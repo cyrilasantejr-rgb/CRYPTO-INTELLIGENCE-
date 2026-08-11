@@ -14,6 +14,9 @@ moto[s3]>=5.0  # test-only: mocks S3 in unit tests, no real AWS needed
 # Phase 3: Databricks/PySpark Bronze -> Silver
 pyspark>=3.5
 
+# Phase 4: feature engineering (EMA/MACD via pandas UDF)
+pandas>=2.0
+
 # Testing
 pytest>=8.0
 pytest-cov>=5.0
