@@ -1,0 +1,29 @@
+# Secrets
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Data / artifacts (never commit raw data or model binaries to git)
+data/
+*.parquet
+*.csv
+mlruns/
+*.pkl
+*.joblib
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Docker
+docker-compose.override.yml
