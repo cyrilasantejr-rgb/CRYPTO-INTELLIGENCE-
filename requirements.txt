@@ -4,6 +4,8 @@ python-dotenv>=1.0
 pydantic>=2.6
 requests>=2.31
 
+# Phase 1: market ingestion
+
 # Testing
 pytest>=8.0
 pytest-cov>=5.0
