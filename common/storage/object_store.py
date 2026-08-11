@@ -72,6 +72,21 @@ class ObjectStoreClient:
         logger.info("Wrote %d records to %s", len(records), uri)
         return uri
 
+    def get_object_bytes(self, key: str) -> bytes:
+        """Download an object's raw bytes. Used to stage Bronze files locally
+        before a local Spark session reads them (see databricks/silver/
+        market_silver.py for why local staging is used instead of s3a://)."""
+        response = self._client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"].read()
+
+    def put_object_bytes(self, key: str, data: bytes) -> str:
+        """Upload raw bytes to a key. Used when a file was already written
+        to local disk in the right format (e.g. Spark's own partitioned
+        Parquet output) and just needs to land in object storage as-is,
+        as opposed to write_parquet() which serializes Python dicts."""
+        self._client.put_object(Bucket=self.bucket, Key=key, Body=data)
+        return f"s3://{self.bucket}/{key}"
+
     def list_keys(self, prefix: str) -> list[str]:
         """List all object keys under a prefix (paginated automatically)."""
         keys: list[str] = []

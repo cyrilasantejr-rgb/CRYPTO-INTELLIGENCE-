@@ -123,3 +123,28 @@ is our only copy of "what the vendor actually sent," that risk was judged
 worse than the extra storage/file-count cost. Silver-layer dedup on
 `event_id` (ADR-004) is what reconciles any duplicate candles across files.
 
+---
+
+## ADR-009: Local Spark stages Bronze/Silver via boto3 download/upload, not s3a://
+
+**Context**: Phase 3 needed Spark to read Bronze data from MinIO and write
+Silver data back to it. Spark's native S3 access uses Hadoop's S3A
+connector, which requires exactly-matched JAR versions (hadoop-common,
+hadoop-aws, aws-java-sdk-bundle) - a well-documented source of hours-long
+debugging even for experienced engineers, due to version mismatches.
+
+**Decision**: For local development, the Silver job downloads Bronze
+Parquet files from MinIO using the already-tested `ObjectStoreClient`
+(boto3), runs Spark against local disk, then uploads Silver/quarantine
+output the same way. Spark itself never talks to S3/MinIO directly in
+local dev.
+
+**Tradeoff**: This adds a download/upload step that "real" S3-native Spark
+wouldn't need, and doesn't exercise Spark's actual S3 connector. But real
+Databricks (unlike local PySpark) has S3 access built in natively with no
+JAR configuration required at all - so this local-staging approach is
+purely a local-dev convenience. The transformation logic itself
+(flatten_and_validate in databricks/silver/market_silver.py) is identical
+either way and requires zero changes to run on real Databricks against
+real S3.
+
