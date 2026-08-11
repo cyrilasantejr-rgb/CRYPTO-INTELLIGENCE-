@@ -29,13 +29,21 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from common.storage.object_store import ObjectStoreClient
 from ingestion.market.birdeye_adapter import BirdeyeAdapter
+from ingestion.market.bronze_writer import write_bronze_batch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def run(token_address: str, days: int, interval: str, output_dir: Path) -> Path:
+def run(
+    token_address: str,
+    days: int,
+    interval: str,
+    output_dir: Path,
+    write_to_bronze: bool = True,
+) -> Path:
     load_dotenv()
     api_key = os.environ.get("BIRDEYE_API_KEY")
     if not api_key:
@@ -50,15 +58,31 @@ def run(token_address: str, days: int, interval: str, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"{token_address}_{end.date().isoformat()}.ndjson"
 
-    count = 0
-    with out_path.open("w") as f:
-        for envelope in adapter.fetch_historical_ohlcv(
+    envelopes = list(
+        adapter.fetch_historical_ohlcv(
             token_address=token_address, start=start, end=end, interval=interval
-        ):
-            f.write(envelope.model_dump_json() + "\n")
-            count += 1
+        )
+    )
 
-    logger.info("Wrote %d bronze market events to %s", count, out_path)
+    with out_path.open("w") as f:
+        for envelope in envelopes:
+            f.write(envelope.model_dump_json() + "\n")
+
+    logger.info("Wrote %d bronze market events to %s", len(envelopes), out_path)
+
+    if write_to_bronze and envelopes:
+        store = ObjectStoreClient(
+            bucket=os.environ.get("S3_BUCKET_NAME", "crypto-intelligence"),
+            endpoint_url=os.environ.get("MINIO_ENDPOINT") or None,
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID")
+            or os.environ.get("MINIO_ACCESS_KEY"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY")
+            or os.environ.get("MINIO_SECRET_KEY"),
+        )
+        store.ensure_bucket()
+        uris = write_bronze_batch(envelopes, store)
+        logger.info("Wrote %d bronze partition file(s) to object storage", len(uris))
+
     return out_path
 
 

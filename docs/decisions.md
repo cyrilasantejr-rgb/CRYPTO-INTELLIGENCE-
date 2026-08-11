@@ -99,3 +99,27 @@ APIs and points at real Kafka/S3 in "production" via config/env, not code change
 **Tradeoff**: Redpanda/MinIO aren't bit-for-bit identical to MSK/S3 in every edge
 case, but the wire-protocol compatibility is close enough that this is a standard,
 low-risk pattern for keeping dev costs at zero.
+
+---
+
+## ADR-008: Bronze S3 keys are run-scoped (append-only), not overwritten
+
+**Context**: Phase 2 needed a key scheme for writing Parquet files to S3/MinIO
+Bronze. Two options: a fixed deterministic key per (domain, date, token) that
+gets overwritten on every run, or a key that includes a unique run id so
+every ingestion run produces new files.
+
+**Decision**: Keys include a run id:
+`bronze/{domain}/dt={event_date}/token={token_address}/{run_id}.parquet`.
+Re-running ingestion for an already-covered date/token writes an additional
+file rather than replacing the existing one.
+
+**Tradeoff**: More files accumulate in Bronze over time (storage cost, more
+files for Silver to scan), but this is the only option consistent with
+Bronze being genuinely immutable/append-only (see docs/architecture.md). A
+fixed-key overwrite scheme risks a partial or buggy re-run silently
+destroying previously-good raw data with no way to recover it - since Bronze
+is our only copy of "what the vendor actually sent," that risk was judged
+worse than the extra storage/file-count cost. Silver-layer dedup on
+`event_id` (ADR-004) is what reconciles any duplicate candles across files.
+

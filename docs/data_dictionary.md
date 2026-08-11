@@ -16,6 +16,19 @@ defines the shared envelope and stubs out the domains to come.
 | `domain` | string | One of: market, transaction, wallet, holder, security, news, social |
 | `payload` | JSON | Raw, unmodified source-specific payload |
 
+## S3/MinIO Bronze partitioning scheme (Phase 2)
+
+```
+bronze/{domain}/dt={event_date}/token={token_address}/{run_id}.parquet
+```
+
+- `dt` is the UTC date of `event_timestamp` (when the event happened), not
+  `ingestion_timestamp` (when we received it) - queries filter by when
+  things happened, so that's what should drive partition pruning.
+- `run_id` makes writes append-only: re-running ingestion for an
+  already-covered date/token adds a new file rather than overwriting the
+  prior one. See ADR-008.
+
 ## Domains (schemas to be filled in as each is implemented)
 
 - `market` — price ticks, OHLCV, trades — **Phase 1**
