@@ -262,3 +262,37 @@ threshold-and-data combination from taking down the whole training run,
 consistent with the project's established quarantine/skip-and-log
 philosophy (Silver's data-quality quarantine, Bronze's per-record error
 isolation) applied here to model training instead of row validation.
+
+---
+
+## ADR-014: Airflow runs in its own venv; tasks shell out to the project venv
+
+**Context**: Phase 7 needed to orchestrate the existing pipeline scripts
+(ingestion, Silver, Gold features, backtest, training) as a scheduled
+Airflow DAG.
+
+**Decision**: Airflow is installed in a completely separate Python virtual
+environment from the project's own venv. Every DAG task is a
+`BashOperator` that invokes the project venv's Python interpreter as a
+subprocess to run the actual pipeline script - Airflow itself never
+imports any project code (`ingestion/`, `databricks/`, `features/`,
+`backtesting/`, `ml/`) directly.
+
+**Tradeoff**: This is one more environment to set up and keep track of,
+and BashOperator subprocess calls are slightly less "native" than calling
+Python functions directly via a PythonOperator. But Airflow's own pip
+install pins specific versions of common libraries (SQLAlchemy, Pydantic,
+etc.) via its constraints mechanism, which risks silently downgrading or
+conflicting with the pipeline's own dependencies if installed into the
+same environment - a real, well-documented source of breakage. Separating
+orchestrator environment from execution environment also mirrors how a
+real deployment would actually work (an Airflow worker triggering a
+separate containerized/venv'd task), so this isn't just a local-dev
+workaround - it's the more correct pattern generally.
+
+**Scope note**: the DAG hardcodes a single token via an Airflow Variable
+rather than dynamically generating one task per token in a watchlist.
+A real watchlist-driven version would use Airflow's dynamic task mapping
+(`.expand()`) to generate one ingestion task per token from a config-
+or database-driven list - deferred as a clear, named future improvement
+rather than silently scoped out.
