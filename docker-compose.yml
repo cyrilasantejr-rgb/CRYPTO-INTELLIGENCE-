@@ -16,8 +16,35 @@ services:
       timeout: 5s
       retries: 5
 
+  # Phase 8: Kafka-API-compatible message broker for near-real-time price
+  # streaming. Redpanda, not real Kafka - see ADR-007 for why (single
+  # binary, no Zookeeper, lighter for local dev, same wire protocol so
+  # producer/consumer code is identical to what real Kafka/MSK would need).
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"   # Kafka-compatible API - our producer/consumer connect here
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   minio_data:
+  redpanda_data:
 
-# Services from later phases (Postgres, Redis, Redpanda, Airflow) are added
-# incrementally as each phase needs them - see docs/decisions.md ADR-007.
+# Services from later phases (Postgres, Redis) are added incrementally as
+# each phase needs them - see docs/decisions.md ADR-007.
