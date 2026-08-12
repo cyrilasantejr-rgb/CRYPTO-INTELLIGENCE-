@@ -47,16 +47,25 @@ logger = logging.getLogger(__name__)
 GOLD_PREFIX = "gold/token_market_features/"
 MODELS_DIR = Path("models")
 
-# Entry model: does price rise 3% before falling 2%, within 6 hours?
+# Entry model: does price rise before falling, within 6 hours?
+# Thresholds tuned against observed data, not picked arbitrarily: a
+# real 7-day SOL pull showed a total peak-to-trough range of ~6.7% across
+# the ENTIRE week - a 3%-within-6-hours move (the original threshold)
+# essentially never occurs at that volatility, which is exactly why the
+# first real run of this script produced an all-zero label column and
+# crashed sklearn with "only one class present". 1%/1% is still a real,
+# meaningful move at this token's actual volatility, not a threshold
+# picked to force some 1s to appear.
 ENTRY_HORIZON = 6
-ENTRY_UPPER_PCT = 0.03
-ENTRY_LOWER_PCT = 0.02
+ENTRY_UPPER_PCT = 0.01
+ENTRY_LOWER_PCT = 0.01
 
 # Exit model: given a simulated 4-hour-old position, does price drop
-# more than 2% at any point in the next 3 hours?
+# meaningfully at any point in the next 3 hours? Lowered for the same
+# reason as the entry thresholds above - see comment there.
 EXIT_HOLDING_PERIOD = 4
 EXIT_HORIZON = 3
-EXIT_DECLINE_THRESHOLD = 0.02
+EXIT_DECLINE_THRESHOLD = 0.01
 
 
 def _make_store() -> ObjectStoreClient:
@@ -119,12 +128,31 @@ def run() -> None:
 
         if len(entry_ready) >= 20:
             entry_train, entry_test = chronological_split(entry_ready)
-            entry_result = train_entry_model(entry_train, entry_test)
-            logger.info("[%s] ENTRY MODEL metrics: %s", token, entry_result.metrics)
-            joblib.dump(entry_result.model, MODELS_DIR / f"entry_{token}.joblib")
-            joblib.dump(
-                entry_result.scaler, MODELS_DIR / f"entry_scaler_{token}.joblib"
-            )
+            # Guard against a single-class training set - a real
+            # possibility with a short history or low-volatility window
+            # (this is exactly what happened on the first real run
+            # against 7 days of a stable token: every label came back 0,
+            # and sklearn's LogisticRegression.fit() crashed with an
+            # unhelpful "only one class present" error). Skip with a
+            # clear, actionable log message instead of letting the whole
+            # training run die - the same "quarantine and continue"
+            # philosophy as Silver's data-quality handling, applied to
+            # model training rather than row validation.
+            if entry_train["label"].nunique() < 2:
+                logger.warning(
+                    "[%s] entry training set has only one label class "
+                    "(all %s) - skipping. Try a longer history, a more "
+                    "volatile token, or looser barrier thresholds.",
+                    token,
+                    entry_train["label"].iloc[0],
+                )
+            else:
+                entry_result = train_entry_model(entry_train, entry_test)
+                logger.info("[%s] ENTRY MODEL metrics: %s", token, entry_result.metrics)
+                joblib.dump(entry_result.model, MODELS_DIR / f"entry_{token}.joblib")
+                joblib.dump(
+                    entry_result.scaler, MODELS_DIR / f"entry_scaler_{token}.joblib"
+                )
         else:
             logger.warning(
                 "[%s] not enough usable rows (%d) to train entry model - skipping",
@@ -146,10 +174,21 @@ def run() -> None:
 
         if len(exit_ready) >= 20:
             exit_train, exit_test = chronological_split(exit_ready)
-            exit_result = train_exit_model(exit_train, exit_test)
-            logger.info("[%s] EXIT MODEL metrics: %s", token, exit_result.metrics)
-            joblib.dump(exit_result.model, MODELS_DIR / f"exit_{token}.joblib")
-            joblib.dump(exit_result.scaler, MODELS_DIR / f"exit_scaler_{token}.joblib")
+            # Same class-balance guard as the entry model above.
+            if exit_train["exit_label"].nunique() < 2:
+                logger.warning(
+                    "[%s] exit training set has only one label class "
+                    "(all %s) - skipping.",
+                    token,
+                    exit_train["exit_label"].iloc[0],
+                )
+            else:
+                exit_result = train_exit_model(exit_train, exit_test)
+                logger.info("[%s] EXIT MODEL metrics: %s", token, exit_result.metrics)
+                joblib.dump(exit_result.model, MODELS_DIR / f"exit_{token}.joblib")
+                joblib.dump(
+                    exit_result.scaler, MODELS_DIR / f"exit_scaler_{token}.joblib"
+                )
         else:
             logger.warning(
                 "[%s] not enough usable rows (%d) to train exit model - skipping",
