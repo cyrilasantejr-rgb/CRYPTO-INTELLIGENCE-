@@ -44,13 +44,31 @@ def _make_store() -> ObjectStoreClient:
 
 
 def _download_locally(store: ObjectStoreClient, prefix: str, local_dir: Path) -> int:
+    """
+    Downloads every object under `prefix`, preserving its relative path
+    below the prefix (e.g. token_address=X/event_date=Y/part-....parquet).
+
+    This matters because Silver/Gold data is written by Spark's
+    partitionBy("token_address", "event_date") - which does NOT store
+    those two columns inside the Parquet files at all, only in the
+    directory structure (Hive-style partitioning). Flattening every file
+    into one directory with renamed filenames (as Phase 3's Bronze
+    download does) would silently throw away token_address and
+    event_date, since they were never actually IN the file content to
+    begin with - only reconstructable by Spark from folder names when it
+    reads the partitioned directory tree as a whole.
+    """
     keys = store.list_keys(prefix=prefix)
     if not keys:
         logger.warning("No objects found under %s", prefix)
         return 0
-    for i, key in enumerate(keys):
-        data = store.get_object_bytes(key)
-        (local_dir / f"file_{i}.parquet").write_bytes(data)
+
+    for key in keys:
+        relative = key.removeprefix(prefix)
+        dest = local_dir / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(store.get_object_bytes(key))
+
     return len(keys)
 
 

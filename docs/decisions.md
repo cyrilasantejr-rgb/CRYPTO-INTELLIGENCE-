@@ -148,3 +148,37 @@ purely a local-dev convenience. The transformation logic itself
 either way and requires zero changes to run on real Databricks against
 real S3.
 
+---
+
+## ADR-010: Downloading Spark-partitioned data must preserve folder structure
+
+**Context**: Phase 4's feature job downloads Silver Parquet from MinIO the
+same way Phase 3 downloads Bronze - or so it seemed. Running it for real
+against actual Silver data raised `UNRESOLVED_COLUMN: token_address`, even
+though the Silver write in Phase 3 clearly includes that column.
+
+**Root cause**: `df.write.partitionBy("token_address", "event_date")`
+does NOT store those columns inside the Parquet files - Spark encodes them
+entirely in the directory structure instead
+(`token_address=X/event_date=Y/part-....parquet`), and reconstructs them
+as columns only when reading the partitioned directory tree as a whole
+("Hive-style partition discovery"). Bronze never hit this because Bronze
+is written with plain boto3/pyarrow, where token_address genuinely is a
+column inside the file - Silver and Gold, written by Spark's
+`partitionBy`, are fundamentally different on this point.
+
+The original download helper flattened every downloaded file into one
+directory with renamed filenames (`file_0.parquet`, `file_1.parquet`...),
+which silently discarded the partition folder names Spark needed to
+reconstruct `token_address`/`event_date`.
+
+**Decision**: the download helper preserves each object's relative path
+below its prefix, recreating the same `token_address=X/event_date=Y/`
+folder structure locally before Spark reads it.
+
+**Tradeoff**: none really - this is strictly a bug fix, not a design
+tradeoff. Worth documenting anyway because it's a genuinely common
+Spark gotcha: partition columns live in the path, not the file, and any
+code that moves partitioned Parquet files around (not just our MinIO
+staging step) needs to either preserve that path structure or explicitly
+re-derive the partition columns some other way.
