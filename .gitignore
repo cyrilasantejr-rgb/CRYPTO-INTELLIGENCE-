@@ -30,3 +30,4 @@ docker-compose.override.yml
 
 # Trained model artifacts (Phase 6+)
 models/
+logs/
