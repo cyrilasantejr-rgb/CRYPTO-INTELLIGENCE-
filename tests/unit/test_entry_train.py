@@ -82,3 +82,14 @@ def test_scaler_is_fit_only_on_train_data():
 
     expected_mean = train_df[FEATURE_COLUMNS].mean().to_numpy()
     np.testing.assert_allclose(result.scaler.mean_, expected_mean, rtol=1e-6)
+
+
+def test_has_both_classes_detects_single_class():
+    """The real failure mode this guards against: a real run against a
+    quiet week of data hit exactly this - a training split where every
+    label was 0, which crashes sklearn's LogisticRegression.fit()."""
+    from ml.entry.train import has_both_classes
+
+    assert has_both_classes(np.array([0.0, 1.0, 0.0, 1.0])) is True
+    assert has_both_classes(np.array([0.0, 0.0, 0.0])) is False
+    assert has_both_classes(np.array([1.0, 1.0])) is False

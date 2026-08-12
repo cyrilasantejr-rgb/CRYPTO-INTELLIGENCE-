@@ -84,6 +84,15 @@ def prepare_exit_training_data(
     return df.dropna(subset=required).reset_index(drop=True)
 
 
+def has_both_classes(y: np.ndarray) -> bool:
+    """See ml/entry/train.py's has_both_classes for the full rationale -
+    same guard, same reason, kept as a duplicate rather than a shared
+    import since these are two genuinely separate models (ADR-005) and
+    this check is small enough that sharing it isn't worth coupling
+    them together."""
+    return len(np.unique(y)) >= 2
+
+
 def train_exit_model(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,

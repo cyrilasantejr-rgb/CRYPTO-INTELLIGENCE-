@@ -226,3 +226,30 @@ training/evaluation code (train_exit_model) only depends on column
 names, not on where those columns came from - when Phase 13 lands,
 `add_simulated_position_features` gets replaced by a real position-data
 join, and no other exit model code needs to change.
+---
+
+## ADR-013: Entry/exit training checks for both label classes before fitting
+
+**Context**: A real run against actual SOL data crashed with
+`ValueError: This solver needs samples of at least 2 classes` -
+LogisticRegression cannot fit when the training split contains only one
+label value. With the original thresholds (3% up before 2% down within
+6 hours), that particular week's SOL price action never actually hit
+the upper barrier once in the training portion - a genuine market
+observation (low realized volatility that week), not a bug.
+
+**Decision**: Both `ml/entry/train.py` and `ml/exit/train.py` expose a
+`has_both_classes()` check. The orchestration script
+(`ml/run_training.py`) calls it before ever calling `.fit()`, and skips
+that token with a clear, actionable warning (suggesting the specific
+hyperparameters to loosen) rather than crashing the whole run. Default
+entry/exit thresholds were also loosened (1.5%/12h instead of the
+original 3%/6h) to better match the realized volatility actually
+observed in real data.
+
+**Tradeoff**: This is a defensive-programming fix with essentially no
+downside - a real production pipeline covering many tokens WILL
+regularly encounter tokens/windows with single-class label splits
+(illiquid tokens, quiet weeks, short backtits windows), and crashing
+the entire batch run over one token's data characteristics would be far
+worse than skipping that one token with a clear explanation.

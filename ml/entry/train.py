@@ -66,6 +66,18 @@ def prepare_training_data(
     return df.dropna(subset=required).reset_index(drop=True)
 
 
+def has_both_classes(y: np.ndarray) -> bool:
+    """
+    A real, expected failure mode with small datasets: a token/window
+    combination can legitimately have zero positive examples (e.g. price
+    never hit the upper barrier at all in a given week). Logistic
+    regression cannot fit with only one class present - this check lets
+    callers detect that BEFORE calling fit and skip gracefully with a
+    clear message, rather than crashing on sklearn's ValueError.
+    """
+    return len(np.unique(y)) >= 2
+
+
 def train_entry_model(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,

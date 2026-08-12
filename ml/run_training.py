@@ -33,12 +33,15 @@ from dotenv import load_dotenv
 from common.storage.object_store import ObjectStoreClient
 from ml.entry.labels import triple_barrier_label
 from ml.entry.split import chronological_split
-from ml.entry.train import prepare_training_data, train_entry_model
+from ml.entry.train import has_both_classes, prepare_training_data, train_entry_model
 from ml.exit.labels import exit_label
 from ml.exit.train import (
     add_simulated_position_features,
     prepare_exit_training_data,
     train_exit_model,
+)
+from ml.exit.train import (
+    has_both_classes as exit_has_both_classes,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -47,16 +50,20 @@ logger = logging.getLogger(__name__)
 GOLD_PREFIX = "gold/token_market_features/"
 MODELS_DIR = Path("models")
 
-# Entry model: does price rise 3% before falling 2%, within 6 hours?
-ENTRY_HORIZON = 6
-ENTRY_UPPER_PCT = 0.03
-ENTRY_LOWER_PCT = 0.02
+# Entry model: does price rise 1.5% before falling 1.5%, within 12 hours?
+# (Loosened from an initial 3%/2%/6h - a real run against one quiet
+# week of SOL data had zero candles hitting a 3% move that fast, which
+# is a legitimate market observation, not a bug. These are tunable
+# hyperparameters, not fixed truth - revisit once more data/tokens exist.)
+ENTRY_HORIZON = 12
+ENTRY_UPPER_PCT = 0.015
+ENTRY_LOWER_PCT = 0.015
 
 # Exit model: given a simulated 4-hour-old position, does price drop
-# more than 2% at any point in the next 3 hours?
+# more than 1.5% at any point in the next 6 hours?
 EXIT_HOLDING_PERIOD = 4
-EXIT_HORIZON = 3
-EXIT_DECLINE_THRESHOLD = 0.02
+EXIT_HORIZON = 6
+EXIT_DECLINE_THRESHOLD = 0.015
 
 
 def _make_store() -> ObjectStoreClient:
@@ -119,12 +126,21 @@ def run() -> None:
 
         if len(entry_ready) >= 20:
             entry_train, entry_test = chronological_split(entry_ready)
-            entry_result = train_entry_model(entry_train, entry_test)
-            logger.info("[%s] ENTRY MODEL metrics: %s", token, entry_result.metrics)
-            joblib.dump(entry_result.model, MODELS_DIR / f"entry_{token}.joblib")
-            joblib.dump(
-                entry_result.scaler, MODELS_DIR / f"entry_scaler_{token}.joblib"
-            )
+            if not has_both_classes(entry_train["label"].to_numpy()):
+                logger.warning(
+                    "[%s] entry training split has only one label class present "
+                    "(likely no candle hit the upper barrier this window) - "
+                    "skipping. Try a smaller ENTRY_UPPER_PCT/ENTRY_LOWER_PCT or "
+                    "a longer ENTRY_HORIZON for this token.",
+                    token,
+                )
+            else:
+                entry_result = train_entry_model(entry_train, entry_test)
+                logger.info("[%s] ENTRY MODEL metrics: %s", token, entry_result.metrics)
+                joblib.dump(entry_result.model, MODELS_DIR / f"entry_{token}.joblib")
+                joblib.dump(
+                    entry_result.scaler, MODELS_DIR / f"entry_scaler_{token}.joblib"
+                )
         else:
             logger.warning(
                 "[%s] not enough usable rows (%d) to train entry model - skipping",
@@ -146,10 +162,20 @@ def run() -> None:
 
         if len(exit_ready) >= 20:
             exit_train, exit_test = chronological_split(exit_ready)
-            exit_result = train_exit_model(exit_train, exit_test)
-            logger.info("[%s] EXIT MODEL metrics: %s", token, exit_result.metrics)
-            joblib.dump(exit_result.model, MODELS_DIR / f"exit_{token}.joblib")
-            joblib.dump(exit_result.scaler, MODELS_DIR / f"exit_scaler_{token}.joblib")
+            if not exit_has_both_classes(exit_train["exit_label"].to_numpy()):
+                logger.warning(
+                    "[%s] exit training split has only one label class present - "
+                    "skipping. Try a smaller EXIT_DECLINE_THRESHOLD or a longer "
+                    "EXIT_HORIZON for this token.",
+                    token,
+                )
+            else:
+                exit_result = train_exit_model(exit_train, exit_test)
+                logger.info("[%s] EXIT MODEL metrics: %s", token, exit_result.metrics)
+                joblib.dump(exit_result.model, MODELS_DIR / f"exit_{token}.joblib")
+                joblib.dump(
+                    exit_result.scaler, MODELS_DIR / f"exit_scaler_{token}.joblib"
+                )
         else:
             logger.warning(
                 "[%s] not enough usable rows (%d) to train exit model - skipping",
