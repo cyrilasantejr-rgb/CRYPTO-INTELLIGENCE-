@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cryptointelligence.dailypipeline</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/150ril/Documents/CRYPTO-INTELLIGENCE-/scripts/run_daily_pipeline.sh</string>
+    </array>
+
+    <!-- Runs daily at 7:00 AM. Change Hour/Minute below to adjust. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- launchd's own stdout/stderr capture, separate from the script's
+         own logging to logs/daily/ - this catches launchd-level errors
+         (e.g. if the script itself fails to even start). -->
+    <key>StandardOutPath</key>
+    <string>/Users/150ril/Documents/CRYPTO-INTELLIGENCE-/logs/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/150ril/Documents/CRYPTO-INTELLIGENCE-/logs/launchd_stderr.log</string>
+
+    <!-- If the Mac is asleep at 7:00 AM, run as soon as it wakes up,
+         rather than skipping the day entirely. -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
