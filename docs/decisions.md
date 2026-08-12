@@ -182,3 +182,24 @@ Spark gotcha: partition columns live in the path, not the file, and any
 code that moves partitioned Parquet files around (not just our MinIO
 staging step) needs to either preserve that path structure or explicitly
 re-derive the partition columns some other way.
+---
+
+## ADR-011: Backtesting engine uses pandas, not Spark
+
+**Context**: Phase 5 needed a backtesting engine that computes a
+compounding equity curve from Gold features and per-row trading signals.
+
+**Decision**: Implemented entirely in pandas/numpy - no Spark session,
+no distributed computation.
+
+**Tradeoff**: An equity curve is inherently sequential (today's capital
+depends on yesterday's capital), the same recursive shape that already
+forced Phase 4's EMA/MACD out of Spark's window functions and into a
+pandas UDF. A backtest runs against an already-aggregated per-token time
+series small enough to comfortably fit in memory - real-world quant
+backtesting libraries (backtrader, vectorbt, zipline) all operate on
+pandas/numpy for exactly this reason. Using Spark here would add
+complexity (session startup, distributed overhead) with no actual
+payoff; the test suite makes this concrete - the backtest engine's full
+test file runs in well under a second, versus 30-45 seconds for any
+Spark-based test file in this repo, because there's no JVM to start.
