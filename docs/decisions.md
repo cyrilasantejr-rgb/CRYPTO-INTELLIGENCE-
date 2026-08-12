@@ -426,3 +426,55 @@ running PySpark jobs in any minimal-environment context (launchd, cron,
 CI, a bare Docker container), not just this project's specific setup.
 Worth setting as standard practice any time PySpark is invoked outside
 an interactive shell.
+
+---
+
+## ADR-019: Polling instead of WebSocket - Birdeye's free tier has no WS access
+
+**Context**: Phase 8 needed a real-time (or near-real-time) price data
+source. WebSocket access was assumed available on the free tier already
+in use since Phase 1.
+
+**Decision**: checked Birdeye's actual pricing page before building
+anything - WebSocket access requires the **Premium tier ($199/month)**
+or higher. The free **Standard** tier (used throughout this project,
+$0/month) has zero WebSocket access. Rather than silently switching to a
+paid tier or building something that would fail on this project's actual
+account, Phase 8 uses fast polling (`/defi/multi_price`, available on the
+free tier) instead of a WebSocket subscription.
+
+**Tradeoff**: polling introduces genuine latency (our default: 20
+seconds) that a WebSocket push wouldn't have - this is NOT true real-time.
+For a personal memecoin-watchlist tool, the difference between "instant"
+and "20 seconds old" is not meaningfully different in practice, and this
+keeps the project's cost at $0. If genuine sub-second latency ever
+becomes a real requirement, upgrading to Premium is a known, isolated
+change - only `ingestion/market/birdeye_realtime_adapter.py` would need
+to change (implement a WebSocket-based adapter behind the same
+`RealtimePriceAdapter` interface); the Kafka producer, consumer, and
+alerting logic would all be unaffected, since they only depend on the
+interface, not the transport.
+
+---
+
+## ADR-020: In-memory alert state, not Redis, for the first pass
+
+**Context**: The stream consumer needs to remember recent price history
+per token to detect meaningful moves (a rolling window). Redis was
+planned in the original architecture as the caching/operational-state
+layer.
+
+**Decision**: `PriceHistoryTracker` holds this state in a plain Python
+dict in memory, not Redis, for this first implementation of Phase 8.
+
+**Tradeoff**: alert history resets to empty if the consumer process
+restarts - a real limitation for a genuinely long-running production
+service. But introducing Redis is a separate, real piece of
+infrastructure (connection handling, serialization format, TTL/eviction
+policy, a new docker-compose service) that deserves its own deliberate
+design rather than being bolted on as an afterthought here. Deferred as
+a clear, named next step rather than silently worked around - the
+`PriceHistoryTracker` class's interface (`update(token, price,
+timestamp) -> Alert | None`) was deliberately kept storage-agnostic, so
+swapping its internal dict for a Redis-backed store later would not
+require changing anything that calls it.

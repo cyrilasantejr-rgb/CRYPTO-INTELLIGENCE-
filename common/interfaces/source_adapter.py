@@ -44,3 +44,33 @@ class MarketDataAdapter(ABC):
             so one malformed record doesn't kill an entire historical backfill
         """
         raise NotImplementedError
+
+
+class RealtimePriceAdapter(ABC):
+    """
+    Interface for any vendor that provides current/latest prices for a
+    watchlist of tokens, via polling (not push/WebSocket).
+
+    Deliberately a SEPARATE interface from MarketDataAdapter, not a new
+    method bolted onto it: "give me the current price for N tokens right
+    now" is a fundamentally different shape of request than "give me
+    historical candles for one token over a date range" - different
+    batching (many tokens per call vs one token per call), different
+    caller (a polling loop vs a one-shot backfill), different vendor
+    endpoint entirely. Forcing both into one interface would make neither
+    shape clean.
+    """
+
+    source_name: str
+
+    @abstractmethod
+    def fetch_latest_prices(
+        self, token_addresses: list[str]
+    ) -> Iterator[BronzeEnvelope]:
+        """
+        Fetch the current price for each address in token_addresses,
+        yielding one BronzeEnvelope per token. Implementations should
+        batch this into as few vendor API calls as the vendor's API
+        allows, rather than one call per token.
+        """
+        raise NotImplementedError

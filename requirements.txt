@@ -17,6 +17,9 @@ pyspark>=3.5
 # Phase 4: feature engineering (EMA/MACD via pandas UDF)
 pandas>=2.0
 
+# Phase 8: near-real-time streaming
+kafka-python-ng>=2.2
+
 # Phase 5: backtesting (pandas/pyarrow already satisfy this - no new deps)
 
 # Phase 6: baseline entry/exit ML
