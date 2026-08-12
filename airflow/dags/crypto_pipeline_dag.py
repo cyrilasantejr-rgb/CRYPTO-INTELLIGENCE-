@@ -35,8 +35,9 @@ from __future__ import annotations
 
 import pendulum
 from airflow.models import Variable
-from airflow.providers.standard.operators.bash import BashOperator
-from airflow.sdk import DAG
+from airflow.operators.bash import BashOperator
+
+from airflow import DAG
 
 PROJECT_ROOT = Variable.get("CRYPTO_PROJECT_ROOT", default_var="/CHANGE_ME")
 VENV_PYTHON = Variable.get(

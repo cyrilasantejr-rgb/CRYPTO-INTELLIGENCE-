@@ -296,3 +296,52 @@ A real watchlist-driven version would use Airflow's dynamic task mapping
 (`.expand()`) to generate one ingestion task per token from a config-
 or database-driven list - deferred as a clear, named future improvement
 rather than silently scoped out.
+
+---
+
+## ADR-015: Airflow 2.11.0, not 3.x - concrete failure, not a preference
+
+**Context**: Phase 7 was initially built against Airflow 3.3.0 (the
+current stable release at the time). DAG parsing succeeded, the DAG
+loaded correctly in the UI with the right 5-task structure, and it
+appeared ready to run - but the first real triggered run failed on the
+very first task with `ModuleNotFoundError: No module named 'airflow.sdk'`,
+raised from inside Airflow's own internal task-launching mechanism,
+before our BashOperator's command ever executed.
+
+**Investigation**: Airflow 3.x introduced a new Task Execution API/Task
+SDK architecture, where each task runs via a supervisor process that
+itself depends on importing `airflow.sdk` to communicate with Airflow's
+API server. This is architecturally more complex than Airflow 2.x's
+model, and the failure occurred in that supervisor layer rather than in
+anything our DAG file does. Rather than trial-and-error against a system
+with unfamiliar internals, this was tested directly: a completely
+separate, throwaway Airflow install was set up specifically to isolate
+the cause.
+
+**Decision**: downgrade to Airflow 2.11.0, using the classic, long-stable
+DAG API (`from airflow import DAG`, `from airflow.operators.bash import
+BashOperator`) instead of the newer `airflow.sdk` module. This avoids the
+Task Execution API entirely.
+
+**Verification, not assumption**: before changing anything in the
+project, this fix was proven in isolation:
+1. Installed Airflow 2.11.0 in a throwaway venv.
+2. Loaded the (rewritten) DAG file through Airflow's actual `DagBag`
+   loader (the same mechanism the real scheduler uses) - zero import
+   errors, exact same 5-task structure as before.
+3. Ran `airflow tasks test crypto_intelligence_pipeline
+   ingest_market_data <date>` against the real DAG file - the task
+   executed the BashOperator's command and returned `Command exited
+   with return code 0` / `Marking task as SUCCESS`, with no trace of
+   the earlier `airflow.sdk` error.
+
+Only after that verification did the fix get applied to the actual
+project DAG file.
+
+**Tradeoff**: Airflow 2.11.0 doesn't have Airflow 3's newer features
+(the redesigned UI, the Task Execution API's stronger process isolation,
+etc.), but for a single-node local-dev setup orchestrating a handful of
+BashOperator tasks, none of those matter, and 2.x's simpler, extremely
+well-documented architecture is a better fit than debugging a newer
+system's internal supervisor process on a fresh local install.
