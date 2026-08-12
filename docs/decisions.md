@@ -387,3 +387,42 @@ and stability matter far more than shaving milliseconds off task startup.
 This setting would very likely be unnecessary on a real Linux production
 deployment (MWAA, a Linux VM, Docker) - it's a macOS-local-dev-specific
 tradeoff, worth revisiting if this project ever moves to a Linux host.
+
+---
+
+## ADR-018: `PYSPARK_PYTHON` must be set explicitly for launchd-run jobs
+
+**Context**: Running `scripts/run_daily_pipeline.sh` interactively worked
+fine, but the automated version failed at the Silver/feature-engineering
+stages with `ModuleNotFoundError: No module named 'pandas'` - inside a
+PySpark worker process, despite the project's venv clearly having pandas
+installed (proven working in every prior interactive run).
+
+**Root cause**: PySpark spawns separate worker subprocesses for
+distributed execution (this happens even in local mode). By default,
+each worker resolves its own `python3` by searching `PATH` at spawn
+time - it does NOT automatically reuse the exact interpreter that
+launched the main script. In an interactive terminal this typically
+works by coincidence (the venv's `bin/` directory is first on `PATH`),
+but launchd runs jobs with a minimal, largely empty `PATH`, so the
+worker silently fell back to a system Python without pandas installed.
+
+**Verification before applying the fix**: reproduced this exact failure
+in isolation - ran a minimal PySpark `applyInPandas` job with a
+deliberately broken `PATH` (no venv, no pandas) and confirmed it failed
+with the identical error. Then set `PYSPARK_PYTHON` to an explicit
+interpreter path with the same broken `PATH` otherwise unchanged, and
+confirmed the job succeeded. This is a controlled before/after test, not
+a guessed fix.
+
+**Decision**: `run_daily_pipeline.sh` now explicitly exports
+`PYSPARK_PYTHON="$VENV_PYTHON"` before any Spark-based stage runs. This
+forces every Spark worker subprocess to use the exact same interpreter as
+the driver, regardless of what `PATH` looks like in the calling
+environment.
+
+**Tradeoff**: none really - this is strictly a correctness fix for
+running PySpark jobs in any minimal-environment context (launchd, cron,
+CI, a bare Docker container), not just this project's specific setup.
+Worth setting as standard practice any time PySpark is invoked outside
+an interactive shell.

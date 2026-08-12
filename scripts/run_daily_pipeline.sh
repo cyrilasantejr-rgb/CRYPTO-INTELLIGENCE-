@@ -16,6 +16,21 @@ VENV_PYTHON="${PROJECT_ROOT}/venv/bin/python3"
 TOKEN="So11111111111111111111111111111111111111112"
 # -------------------------------------------------------------------
 
+# PySpark spawns separate worker subprocesses for distributed execution
+# (even in local mode) - by default it resolves "python3" via PATH at
+# spawn time, NOT via the interpreter that launched the main script. In
+# an interactive terminal this usually happens to match by luck (venv's
+# bin/ is first on PATH), but launchd runs jobs with a minimal, mostly
+# empty PATH - so without this, Spark's workers silently fall back to a
+# system Python that doesn't have pandas installed, and the Silver and
+# feature-engineering stages (which use pandas UDFs for EMA/MACD) fail
+# with "ModuleNotFoundError: No module named 'pandas'" despite the venv
+# clearly having pandas installed. Setting PYSPARK_PYTHON explicitly
+# forces every Spark worker to use the exact same interpreter as the
+# driver, regardless of PATH. Verified with a controlled before/after
+# test reproducing this exact failure and confirming this fixes it.
+export PYSPARK_PYTHON="$VENV_PYTHON"
+
 LOG_DIR="${PROJECT_ROOT}/logs/daily"
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/$(date +%Y-%m-%d_%H-%M-%S).log"
