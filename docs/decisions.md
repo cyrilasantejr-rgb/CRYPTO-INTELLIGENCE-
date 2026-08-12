@@ -345,3 +345,45 @@ etc.), but for a single-node local-dev setup orchestrating a handful of
 BashOperator tasks, none of those matter, and 2.x's simpler, extremely
 well-documented architecture is a better fit than debugging a newer
 system's internal supervisor process on a fresh local install.
+
+---
+
+## ADR-016: `execute_tasks_new_python_interpreter=True` to fix macOS CPU-spin
+
+**Context**: After fixing the Airflow 3.x incompatibility (ADR-015) and
+the gunicorn `SIGSEGV` crash loop (`OBJC_DISABLE_INITIALIZE_FORK_SAFETY`),
+a real triggered DAG run still failed to progress: the `ingest_market_data`
+task sat in `running` state indefinitely, and its underlying process
+consumed 100% CPU continuously for 7+ minutes (confirmed via `ps aux` -
+real CPU time accumulating, not a blocked/waiting process at ~0% CPU).
+
+**Investigation**: this matches a documented, known macOS + Python issue
+(not specific to this project) where Airflow's `fork()`-based task
+supervisor launching interacts badly with proxy-detection threading
+behavior on macOS, causing a busy-wait/livelock rather than a clean crash
+or completion. Multiple independent Airflow GitHub discussions describe
+the identical symptom and the identical fix.
+
+**Decision**: set `AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER=True`,
+Airflow's own official configuration for avoiding `fork()` when launching
+task supervisor processes - it spawns a fresh subprocess instead, which
+sidesteps the entire class of macOS fork-related issues at the root,
+rather than continuing to patch around individual symptoms.
+
+Also switched local dev from `airflow standalone` (bundles scheduler +
+gunicorn webserver into one process) to running the scheduler and
+webserver as separate processes. The scheduler alone - which is what
+actually executes the pipeline - proved reliable once both fork-related
+fixes were applied; the gunicorn-based webserver remains a known weaker
+point on macOS even with fixes applied, so it's now treated as optional
+(CLI-based triggering/monitoring via `airflow dags trigger` and
+`airflow tasks states-for-dag-run` doesn't depend on it at all).
+
+**Tradeoff**: `execute_tasks_new_python_interpreter=True` is measurably
+slower per task (Airflow has to reload its own dependencies in a fresh
+interpreter for every task, rather than reusing a forked copy), but for
+a personal project with a handful of daily-scheduled tasks, correctness
+and stability matter far more than shaving milliseconds off task startup.
+This setting would very likely be unnecessary on a real Linux production
+deployment (MWAA, a Linux VM, Docker) - it's a macOS-local-dev-specific
+tradeoff, worth revisiting if this project ever moves to a Linux host.
