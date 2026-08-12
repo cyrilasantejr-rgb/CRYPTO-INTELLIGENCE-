@@ -203,3 +203,26 @@ complexity (session startup, distributed overhead) with no actual
 payoff; the test suite makes this concrete - the backtest engine's full
 test file runs in well under a second, versus 30-45 seconds for any
 Spark-based test file in this repo, because there's no JVM to start.
+---
+
+## ADR-012: Phase 6 exit model uses simulated positions, not real ones
+
+**Context**: The exit model's spec calls for position-aware inputs -
+entry price, unrealized P&L, time-in-trade, highest-price-since-entry.
+Real position tracking doesn't exist until Phase 13 (paper trading
+engine).
+
+**Decision**: Phase 6's exit model approximates position-aware features
+by assuming a fixed hypothetical holding period (e.g. "assume entry was
+4 hours ago") computed directly from market data, rather than building
+a throwaway position tracker just to unblock this phase.
+
+**Tradeoff**: The resulting "unrealized_return", "periods_held", and
+"drawdown_from_high" features are approximations, not real position
+state - genuinely different numbers than what Phase 13's real position
+manager will eventually produce. This is stated explicitly in
+ml/exit/train.py's module docstring rather than left implicit. The
+training/evaluation code (train_exit_model) only depends on column
+names, not on where those columns came from - when Phase 13 lands,
+`add_simulated_position_features` gets replaced by a real position-data
+join, and no other exit model code needs to change.
