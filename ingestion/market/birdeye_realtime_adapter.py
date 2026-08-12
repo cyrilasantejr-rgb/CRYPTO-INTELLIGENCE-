@@ -1,15 +1,17 @@
 """
-Birdeye implementation of RealtimePriceAdapter, using the /defi/multi_price
-endpoint to poll current prices for a whole watchlist in one call.
+Birdeye implementation of RealtimePriceAdapter, using the single-token
+/defi/price endpoint, called once per watchlist token.
 
-API reference: https://docs.birdeye.so/reference/get-defi-multi_price
+API reference: https://docs.birdeye.so/reference/get-defi-price
 
-This is intentionally NOT the WebSocket API - see ADR-019 for why: real
-WebSocket access requires Birdeye's Premium tier ($199/mo and up), while
-multi_price is available on the free Standard tier. Polling every ~20-30s
-is not true push-based real-time, but for a personal memecoin watchlist
-the difference between "instant" and "20 seconds old" is not meaningfully
-different in practice, and this keeps the project's cost at $0.
+WHY NOT /defi/multi_price (the batched endpoint): see ADR-021. Checked
+Birdeye's actual "Data Accessibility by Packages" table before writing
+this - /defi/multi_price requires the Lite tier ($39/mo) or above; the
+free Standard tier used throughout this project has NO access to it at
+all (confirmed empirically too: it returned 401 against a key that works
+fine everywhere else). /defi/price (single-token) IS available on
+Standard - the same tier already used for every other endpoint in this
+project - so this adapter calls it once per token instead.
 """
 
 from __future__ import annotations
@@ -27,13 +29,7 @@ from common.schemas.envelope import BronzeEnvelope
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://public-api.birdeye.so/defi/multi_price"
-
-# Birdeye's free Standard tier is rate-limited to 1 request/second overall
-# (see docs/decisions.md ADR-019) - this batches an entire watchlist into
-# ONE call regardless of size, so polling stays well under that limit even
-# with a poll interval far shorter than our chosen default.
-MAX_ADDRESSES_PER_CALL = 100
+BASE_URL = "https://public-api.birdeye.so/defi/price"
 
 
 class BirdeyeRealtimePriceAdapter(RealtimePriceAdapter):
@@ -49,11 +45,8 @@ class BirdeyeRealtimePriceAdapter(RealtimePriceAdapter):
         return {"X-API-KEY": self.api_key, "x-chain": self.chain}
 
     def _get_with_backoff(self, params: dict) -> dict:
-        """Same retry/backoff pattern as BirdeyeAdapter (historical OHLCV) -
-        see that class's docstring for the full reasoning. Kept as a
-        separate copy here rather than shared, since this adapter has a
-        different base URL/response shape and premature sharing would
-        couple two things that only coincidentally look similar today."""
+        """Same retry/backoff pattern used throughout this project's
+        adapters - see birdeye_adapter.py for the full reasoning."""
         for attempt in range(self.max_retries):
             response = self._session.get(
                 BASE_URL, headers=self._headers(), params=params, timeout=10
@@ -61,8 +54,8 @@ class BirdeyeRealtimePriceAdapter(RealtimePriceAdapter):
 
             if response.status_code in (401, 403):
                 raise PermissionError(
-                    f"Birdeye auth failed ({response.status_code}) - check API key. "
-                    "Not retrying."
+                    f"Birdeye auth failed ({response.status_code}) - check API "
+                    "key or account tier for this endpoint. Not retrying."
                 )
 
             if response.status_code == 200:
@@ -71,8 +64,8 @@ class BirdeyeRealtimePriceAdapter(RealtimePriceAdapter):
             if response.status_code == 429 or response.status_code >= 500:
                 delay = (2**attempt) + random.uniform(0, 1)
                 logger.warning(
-                    "Birdeye multi_price request failed (status=%s), "
-                    "attempt %d/%d, retrying in %.1fs",
+                    "Birdeye price request failed (status=%s), attempt %d/%d, "
+                    "retrying in %.1fs",
                     response.status_code,
                     attempt + 1,
                     self.max_retries,
@@ -84,32 +77,44 @@ class BirdeyeRealtimePriceAdapter(RealtimePriceAdapter):
             response.raise_for_status()
 
         raise RuntimeError(
-            f"Birdeye multi_price failed after {self.max_retries} retries"
+            f"Birdeye price request failed after {self.max_retries} retries"
         )
 
     def fetch_latest_prices(
         self, token_addresses: list[str]
     ) -> Iterator[BronzeEnvelope]:
-        if len(token_addresses) > MAX_ADDRESSES_PER_CALL:
-            raise ValueError(
-                f"Got {len(token_addresses)} addresses, Birdeye's multi_price "
-                f"caps at {MAX_ADDRESSES_PER_CALL} per call. Batch your "
-                "watchlist into multiple calls if you exceed this."
-            )
-        if not token_addresses:
-            return
-
-        params = {"list_address": ",".join(token_addresses)}
-        data = self._get_with_backoff(params)
-        prices = data.get("data", {})
-
+        """
+        One /defi/price call PER token - not a batched call. This is a
+        real cost/scale tradeoff, not an oversight: it means N tokens in
+        the watchlist means N API calls per poll, whereas the (paid-tier-
+        only) multi_price endpoint would do it in one call regardless of
+        N. For a small personal watchlist (a handful of tokens) at a
+        20-second poll interval, this is well within the free Standard
+        tier's 1 request/second rate limit. If the watchlist grows large
+        enough that this becomes a real constraint, that's the concrete
+        signal to actually pay for Lite/Premium - not something to
+        silently work around further on the free tier.
+        """
         for address in token_addresses:
-            entry = prices.get(address)
+            params = {"address": address}
+            try:
+                data = self._get_with_backoff(params)
+            except PermissionError:
+                raise
+            except RuntimeError:
+                # _get_with_backoff exhausted its retries for this one
+                # token - skip it and move on to the rest of the
+                # watchlist this poll, rather than one bad token blocking
+                # everyone else.
+                logger.warning(
+                    "Failed to fetch price for %s after retries - skipping "
+                    "this token this poll",
+                    address,
+                )
+                continue
+
+            entry = data.get("data")
             if entry is None or entry.get("value") is None:
-                # Docs explicitly note this happens for unknown/unsupported
-                # tokens - skip quietly rather than raising, same
-                # "one bad record doesn't kill the batch" principle as the
-                # historical adapter.
                 logger.warning(
                     "No price data returned for %s - skipping this poll", address
                 )

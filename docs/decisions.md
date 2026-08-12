@@ -478,3 +478,40 @@ a clear, named next step rather than silently worked around - the
 timestamp) -> Alert | None`) was deliberately kept storage-agnostic, so
 swapping its internal dict for a Redis-backed store later would not
 require changing anything that calls it.
+
+---
+
+## ADR-021: `/defi/price` (single-token), not `/defi/multi_price`, on the free tier
+
+**Context**: Phase 8's realtime adapter was originally built against
+Birdeye's `/defi/multi_price` endpoint, expecting it to be available on
+the same free Standard tier used throughout this project. Running it for
+real against the actual API produced a `401` auth error - on the exact
+same API key that has worked for every other endpoint used so far.
+
+**Investigation**: fetched Birdeye's actual "Data Accessibility by
+Packages" table rather than guessing. It confirms `/defi/multi_price`
+requires the **Lite tier ($39/mo)** or above; the free **Standard** tier
+has no access to it at all. The same table confirms `/defi/price`
+(single-token) IS available on Standard - the same endpoint shape
+already used successfully by the historical OHLCV work since Phase 1.
+
+**Decision**: `BirdeyeRealtimePriceAdapter` now calls `/defi/price` once
+per token in the watchlist, instead of batching the whole watchlist into
+one `/defi/multi_price` call.
+
+**Tradeoff, stated plainly**: this means N tokens in the watchlist means
+N API calls per poll, not 1 - a real cost that scales linearly instead of
+staying flat. For the current 1-token watchlist this is a non-issue, and
+even a watchlist of a dozen tokens stays comfortably within the free
+tier's 1 request/second limit at a 20-second poll interval. If the
+watchlist grows large enough for this to become a genuine constraint,
+that's the concrete, measurable signal to actually pay for Lite/Premium
+- not something to keep working around on the free tier indefinitely.
+
+**Process note**: this is the second time in this project a Birdeye
+tier-access assumption turned out to be wrong when checked against real
+usage (the first being WebSocket access, ADR-019). Both times the fix
+was found by checking Birdeye's actual, current documentation rather
+than assuming based on what "should" be available on a free tier - worth
+remembering as a standing practice for any future vendor integration.
