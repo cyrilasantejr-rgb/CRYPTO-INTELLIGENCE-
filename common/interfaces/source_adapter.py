@@ -74,3 +74,29 @@ class RealtimePriceAdapter(ABC):
         allows, rather than one call per token.
         """
         raise NotImplementedError
+
+
+class HolderDataAdapter(ABC):
+    """
+    Interface for any vendor that provides token holder distribution
+    data - who owns how much of a given token, used for concentration/
+    rug-risk analysis in Phase 9/10.
+
+    Separate interface, not bolted onto MarketDataAdapter or
+    RealtimePriceAdapter, for the same reason those two are separate from
+    each other: "who holds this token and how much" is a fundamentally
+    different question from price history or current price, with a
+    different vendor endpoint and a different response shape.
+    """
+
+    source_name: str
+
+    @abstractmethod
+    def fetch_top_holders(self, token_address: str, limit: int = 100) -> BronzeEnvelope:
+        """
+        Fetch the top `limit` holders (grouped by owner wallet, not raw
+        token account) for a token, returning one BronzeEnvelope whose
+        payload contains the full holder list plus any vendor-provided
+        summary stats (e.g. top-10 concentration percentage).
+        """
+        raise NotImplementedError

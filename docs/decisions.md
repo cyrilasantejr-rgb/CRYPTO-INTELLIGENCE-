@@ -515,3 +515,49 @@ usage (the first being WebSocket access, ADR-019). Both times the fix
 was found by checking Birdeye's actual, current documentation rather
 than assuming based on what "should" be available on a free tier - worth
 remembering as a standing practice for any future vendor integration.
+
+---
+
+## ADR-022: Herfindahl-Hirschman Index alongside top-10% concentration
+
+**Context**: Phase 9's holder-concentration analysis needed a way to
+quantify rug-pull-adjacent risk from holder distribution data.
+
+**Decision**: compute both `top10_concentration_pct` (the standard,
+easy-to-explain "do 10 wallets own most of the supply?" number) AND the
+Herfindahl-Hirschman Index (HHI - sum of squared ownership shares, a
+standard concentration measure from economics/antitrust analysis),
+rather than relying on top-10% alone.
+
+**Why both, concretely**: two holder distributions can have identical
+top10_concentration_pct but very different real risk. 10 wallets each
+holding 3% (30% total) is meaningfully different from 1 wallet holding
+21% and 9 wallets holding 1% each (also 30% total) - the second is a
+single dominant whale, the first is a more genuinely distributed group.
+top10% alone reports these as identical; HHI correctly reports the
+second as more concentrated. Verified with a test constructing exactly
+this pair of distributions and asserting HHI tells them apart.
+
+**Decision, part two**: this module deliberately does NOT blend these
+into one composite 0-100 risk score. That blending is Phase 10's
+security/decision engine's job - it will combine this signal with
+liquidity, mint authority, and other security signals using its own
+explicit, documented logic. Doing that blending here, prematurely and
+in isolation, would hide exactly the nuance (see the HHI example above)
+that makes computing two separate metrics worthwhile in the first place.
+Risk tiers ARE assigned here (LOW/MODERATE/HIGH/VERY_HIGH/CRITICAL,
+directly off top10_concentration_pct), matching the 0-20/21-40/41-60/
+61-80/81-100 RUG_RISK_SCORE scale from the project's original design -
+kept on that same scale specifically so Phase 10 can reason about this
+signal consistently with everything else, without another unit
+conversion.
+
+**Honest limitation**: like Phase 8's Kafka wiring, the adapter's real
+API call has not been run against the live Birdeye endpoint by me before
+handing this off - I don't have a route to birdeye.so from this sandbox.
+Only the pure concentration-math logic (7 tests) and the adapter's
+request-construction/retry logic (4 tests, mocked HTTP) have been
+verified. The exact response field names (`items`, `ui_amount`,
+`top10HoldPercent`) are based on Birdeye's published API reference, not
+a live-tested response - this is the first real test of this exact
+endpoint shape, on the actual Mac.
