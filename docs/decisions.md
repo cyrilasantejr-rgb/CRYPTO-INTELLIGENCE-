@@ -226,3 +226,39 @@ training/evaluation code (train_exit_model) only depends on column
 names, not on where those columns came from - when Phase 13 lands,
 `add_simulated_position_features` gets replaced by a real position-data
 join, and no other exit model code needs to change.
+
+---
+
+## ADR-013: Entry/exit label thresholds tuned to observed volatility; training guards against single-class data
+
+**Context**: The first real run of Phase 6 training (7 days of hourly SOL
+data) crashed with `ValueError: This solver needs samples of at least 2
+classes`. Root cause: the original entry-model thresholds (3% up before
+2% down, within 6 hours) were picked without reference to the actual
+data - the real dataset's total peak-to-trough range across the entire
+week was only ~6.7%, making a 3%-within-6-hours move essentially
+unreachable. Every label came back 0, and scikit-learn's
+LogisticRegression has no valid decision boundary to fit with only one
+class present.
+
+**Decision**: Two separate fixes, addressing two separate problems:
+1. Lowered `ENTRY_UPPER_PCT`/`ENTRY_LOWER_PCT` to 1%/1% and
+   `EXIT_DECLINE_THRESHOLD` to 1%, based on the token's actual observed
+   volatility rather than an arbitrary guess.
+2. Added an explicit class-balance check in `ml/run_training.py` before
+   calling either training function - if a training split ends up with
+   only one label class (which will happen again with a different
+   token, a calmer week, or tighter thresholds), the run logs a clear,
+   actionable warning and skips that token/model rather than crashing
+   the entire training run.
+
+**Tradeoff**: 1%/1% thresholds mean the entry model is now predicting a
+smaller, more frequent move rather than a rarer, larger one - a
+legitimate modeling choice with its own tradeoffs (more trade
+opportunities, smaller edge per trade, more sensitive to trading costs
+from the Phase 5 backtest engine) rather than a strictly "better" number.
+The class-balance guard doesn't fix bad thresholds - it just stops a bad
+threshold-and-data combination from taking down the whole training run,
+consistent with the project's established quarantine/skip-and-log
+philosophy (Silver's data-quality quarantine, Bronze's per-record error
+isolation) applied here to model training instead of row validation.
