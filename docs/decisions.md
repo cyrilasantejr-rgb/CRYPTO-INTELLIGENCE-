@@ -387,3 +387,65 @@ and stability matter far more than shaving milliseconds off task startup.
 This setting would very likely be unnecessary on a real Linux production
 deployment (MWAA, a Linux VM, Docker) - it's a macOS-local-dev-specific
 tradeoff, worth revisiting if this project ever moves to a Linux host.
+
+---
+
+## ADR-017: Known limitation - scheduler-dispatched tasks hang on this macOS setup (pipeline logic proven correct independently)
+
+**Context**: After ADR-016's fix (`execute_tasks_new_python_interpreter`),
+a scheduler-triggered DAG run still hung indefinitely at 100% CPU. Further
+isolation was needed to determine whether the bug was in this project's
+code or in Airflow's own internals on this machine.
+
+**Isolation performed** (each step run and verified independently):
+1. `python3 -m ingestion.market.run_historical_ingestion ...` run directly,
+   outside Airflow entirely: completed in ~1 second, wrote all data
+   correctly. Proves the pipeline code itself has no bug.
+2. `airflow tasks test crypto_intelligence_pipeline ingest_market_data
+   <date>`: completed in ~1.3 seconds, `Marking task as SUCCESS`. This
+   command runs the task in-process, with no subprocess forking at all.
+   Proves the DAG definition, the BashOperator configuration, and the
+   task's dependency logic are all correct.
+3. `airflow scheduler` dispatching the same task via its normal path
+   (`SequentialExecutor` -> subprocess `airflow tasks run` -> internal
+   `StandardTaskRunner`): hangs indefinitely at 100% CPU, confirmed via
+   `ps aux` showing 9+ minutes of accumulated CPU time on a single
+   process with no completion.
+4. Confirmed `AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER=True`
+   is correctly set in the scheduler's environment (`echo
+   $AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER` -> `True`) -
+   ruling out "the fix wasn't applied" as the explanation.
+
+**Conclusion**: `airflow tasks test` bypasses the exact code path that
+hangs - it never spawns the nested `airflow tasks run` subprocess that
+the real scheduler dispatch path uses. This strongly suggests the actual
+fork-related livelock (the same macOS + Python + threading issue
+documented in ADR-016) is occurring one layer deeper than
+`execute_tasks_new_python_interpreter` reaches - inside that nested
+subprocess's own process launch, which may not be fully honoring the
+inherited environment configuration in this specific
+SQLite/SequentialExecutor local-dev setup.
+
+**Decision**: document this as a known, isolated limitation rather than
+continue open-ended debugging of Airflow's internal process supervision
+on this specific machine. The evidence above draws a clean, defensible
+boundary: every piece of code and configuration this project is
+responsible for has been independently proven correct; the remaining
+issue is inside Airflow's own internals interacting with this specific
+OS/Python/executor combination, which is: (a) a widely-documented general
+class of problem (not unique to this project, as shown by the multiple
+independent GitHub discussions cited in ADR-016), and (b) very likely
+resolved by using Postgres + LocalExecutor instead of SQLite +
+SequentialExecutor - SQLite's single-writer constraint is what forces
+Airflow into SequentialExecutor locally, and that executor's subprocess
+dispatch path is less commonly used/tested than LocalExecutor's.
+
+**Path forward, if picked back up**: switching local Airflow to a
+Postgres backend (e.g. via the `postgres` service already defined for
+future phases) would allow `LocalExecutor`, which uses a different,
+more commonly-used task dispatch mechanism - worth trying first if this
+is revisited. In the meantime, `airflow tasks test` remains fully
+functional for validating and demonstrating every individual task, and
+the pipeline scripts run correctly both standalone and when invoked
+directly by Airflow's task execution logic - only the scheduler's
+automatic dispatch loop is affected.

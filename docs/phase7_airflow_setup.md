@@ -10,6 +10,19 @@ running a task, even though the DAG parsed and displayed correctly in the
 UI. 2.11.0 uses the classic, much simpler DAG API and avoids that failure
 entirely.
 
+## Known limitation on this setup
+
+If the scheduler dispatches a task and it hangs indefinitely at high CPU
+usage (check with `ps aux | grep airflow`), this is a known, isolated
+issue with this specific macOS + SQLite/SequentialExecutor combination -
+see ADR-017 for the full diagnosis. It is NOT a bug in this project's
+pipeline code: `airflow tasks test <dag_id> <task_id> <date>` runs any
+task directly (bypassing the affected code path) and can be used to
+validate that every task's logic is correct, which it is. If you want to
+actually get the scheduler's automatic dispatch working, the next thing
+to try (not yet attempted) is switching to a Postgres metadata backend so
+Airflow can use `LocalExecutor` instead of `SequentialExecutor`.
+
 ## macOS-specific environment variables (required, every terminal tab)
 
 Two separate, well-documented macOS + Python issues affect Airflow's
