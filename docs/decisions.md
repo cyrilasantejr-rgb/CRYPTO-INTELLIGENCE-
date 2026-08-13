@@ -773,3 +773,54 @@ and the holder field-casing issue, only surface on a real run no matter
 how carefully the docs are checked beforehand. Both are worth continuing
 as practice - check first when possible, and build every integration to
 degrade honestly when a real run reveals something docs didn't show.
+
+---
+
+## ADR-028: mint/freeze authority now read directly from on-chain data via Solana RPC
+
+**Context**: ADR-027 found `/defi/token_security` requires a paid
+Birdeye tier, leaving mint/freeze authority as a permanent data gap.
+This picks up the "genuine free alternative" ADR-027 identified but
+didn't build yet.
+
+**Decision**: `rug_pull_intelligence/solana_rpc_adapter.py` calls
+Solana's standard JSON-RPC `getAccountInfo` method (with
+`encoding: "jsonParsed"`) via Helius's RPC endpoint - already set up in
+this project, free tier, no additional signup needed. Mint and freeze
+authority are literal fields in an SPL Token mint account's on-chain
+data; `jsonParsed` encoding has RPC nodes decode that raw account data
+into a structured response using the SPL Token program's own stable,
+well-known account layout.
+
+**Why this is a genuine improvement, not just a substitute**: this is
+core, standardized Solana RPC behavior, not a single vendor's evolving
+REST API surface. Any Solana RPC provider returns the identical shape,
+because it's the protocol's own account format being decoded, not one
+company's interpretation of it. This is arguably MORE trustworthy than
+the original Birdeye-based approach would have been, not merely a
+free workaround for a paid feature.
+
+**Verified thoroughly on the parsing side**: 7 tests for
+`parse_mint_authority_flags()` covering both authorities active, both
+renounced (the safe case), each individually active, explicit null vs.
+absent field (both must mean "renounced"), and malformed/unexpected
+response shapes returning "unknown" rather than crashing or guessing.
+4 tests for the adapter's request construction and retry logic,
+including the JSON-RPC-specific case where errors arrive as HTTP 200
+with an `error` field in the body, not an HTTP error status - different
+from every REST adapter elsewhere in this project, and worth getting
+right rather than reusing REST-shaped error handling by copy-paste.
+
+**Wiring change**: `run_security_check.py`'s authority check now uses
+`HELIUS_API_KEY` instead of `BIRDEYE_API_KEY` - the old
+`BirdeyeSecurityAdapter` code from ADR-026 is left in place (still
+correct, still tested) but no longer called from the runner, since it's
+confirmed non-functional on the free tier per ADR-027.
+
+**Known limitation carried forward**: this reads the BASE SPL Token
+mint layout. Token-2022 mints with extensions (transfer fees, transfer
+hooks, etc.) would still correctly report mint/freeze authority (those
+fields exist in the same base `info` object regardless of extensions),
+but wouldn't surface extension-specific risks like transfer restrictions
+or built-in fees - a genuinely separate, more involved piece of parsing
+not built here.
