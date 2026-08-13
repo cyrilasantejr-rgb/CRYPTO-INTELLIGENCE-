@@ -36,9 +36,7 @@ def run(token_address: str) -> None:
 
     items = envelope.payload.get("items", [])
     amounts = [
-        item.get("ui_amount", 0.0)
-        for item in items
-        if item.get("ui_amount") is not None
+        item.get("amount", 0.0) for item in items if item.get("amount") is not None
     ]
 
     if not amounts:
@@ -52,7 +50,7 @@ def run(token_address: str) -> None:
 
     metrics = compute_concentration_metrics(amounts)
 
-    vendor_top10 = envelope.payload.get("top10HoldPercent")
+    vendor_top10 = envelope.payload.get("top10_hold_percent")
 
     logger.info("=== Holder concentration: %s ===", token_address)
     logger.info("Holders analyzed: %d", metrics.holder_count)
