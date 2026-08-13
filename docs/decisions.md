@@ -871,3 +871,29 @@ names are based on their long-standing, generally documented API shape,
 not a live-verified response - built this way given real time
 constraints tonight. Some adjustment after the first live run should be
 expected, same as several other integrations tonight.
+
+---
+
+## ADR-030: CryptoPanic uses stable `/api/v1/posts/`, not a plan-slug URL
+
+**Context**: Real run of the news adapter failed with `404 Not Found`
+on `https://cryptopanic.com/api/free/v2/posts/` - the plan-slug URL
+pattern (`/api/{plan}/v2/`) built under time pressure in ADR-029 turned
+out to be wrong.
+
+**Fix**: found a real, working community integration (a Glance dashboard
+widget actively using CryptoPanic) using
+`https://cryptopanic.com/api/v1/posts/` - no plan slug at all, just the
+stable v1 API. Confirmed against real, working usage rather than
+docs text alone, since the docs page itself renders via JavaScript this
+project's tooling can't execute (same limitation noted for the Phase 10
+security endpoint).
+
+**Decision**: adapter now uses this confirmed URL. The `plan` constructor
+parameter was removed entirely - it modeled a URL structure that isn't
+actually how the API works.
+
+**Process note**: this is a good example of the "build under time
+pressure, fix quickly once real evidence appears" pattern working as
+intended - the fix took one search (finding real working code, not more
+guessing) and a small, isolated change, not a redesign.
