@@ -31,3 +31,6 @@ docker-compose.override.yml
 # Trained model artifacts (Phase 6+)
 models/
 logs/
+
+# Phase 13: local SQLite paper-trading database
+data/
