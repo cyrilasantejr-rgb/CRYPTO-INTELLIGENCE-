@@ -7,12 +7,11 @@ kept SEPARATE from source credibility, never blended into one score.
 
 API reference: https://cryptopanic.com/developers/api/about
 
-HONEST CAVEAT, same as several adapters tonight: the exact API plan
-slug in the URL path and exact response field names are based on
-CryptoPanic's long-standing, generally documented API shape, not a
-live-verified response - this sandbox has no route to cryptopanic.com
-either. Given the pace of tonight's field-name surprises with other
-vendors, some adjustment after the first live run should be expected.
+HONEST CAVEAT, same as several adapters tonight: while the base URL
+below is now confirmed against a real, working community integration
+example (not just guessed from ambiguous docs - see ADR-030), the exact
+response field names are still based on generally observed API shape,
+not a live-verified response from this exact adapter.
 """
 
 from __future__ import annotations
@@ -28,15 +27,14 @@ from common.schemas.envelope import BronzeEnvelope
 
 logger = logging.getLogger(__name__)
 
-BASE_URL_TEMPLATE = "https://cryptopanic.com/api/{plan}/v2/posts/"
+BASE_URL = "https://cryptopanic.com/api/v1/posts/"
 
 
 class CryptoPanicNewsAdapter:
     source_name = "cryptopanic"
 
-    def __init__(self, auth_token: str, plan: str = "free", max_retries: int = 3):
+    def __init__(self, auth_token: str, max_retries: int = 3):
         self.auth_token = auth_token
-        self.base_url = BASE_URL_TEMPLATE.format(plan=plan)
         self.max_retries = max_retries
         self._session = requests.Session()
 
@@ -44,7 +42,7 @@ class CryptoPanicNewsAdapter:
         """Same retry/backoff pattern used throughout this project's
         adapters - see birdeye_adapter.py for the full reasoning."""
         for attempt in range(self.max_retries):
-            response = self._session.get(self.base_url, params=params, timeout=15)
+            response = self._session.get(BASE_URL, params=params, timeout=15)
 
             if response.status_code in (401, 403):
                 raise PermissionError(
