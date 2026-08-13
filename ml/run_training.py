@@ -26,6 +26,8 @@ import os
 from pathlib import Path
 
 import joblib
+import mlflow
+import mlflow.sklearn
 import pandas as pd
 import pyarrow.parquet as pq
 from dotenv import load_dotenv
@@ -43,6 +45,15 @@ from ml.exit.train import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+# Phase 14: MLflow experiment tracking, SQLite-backed - same reasoning
+# as Phase 13's position storage (ADR-033): a single local file gives
+# full experiment tracking AND model registry functionality without
+# needing a separate tracking server, right-sized for this project's
+# actual scale. Production alternative, stated plainly: run `mlflow
+# server` with a real backend if this ever needs multi-user access.
+MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
+MLFLOW_EXPERIMENT_NAME = "crypto-intelligence-models"
 
 GOLD_PREFIX = "gold/token_market_features/"
 MODELS_DIR = Path("models")
@@ -105,6 +116,9 @@ def _load_gold_as_pandas(store: ObjectStoreClient) -> pd.DataFrame:
 
 
 def run() -> None:
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+
     store = _make_store()
     gold_df = _load_gold_as_pandas(store)
     logger.info("Loaded %d Gold row(s)", len(gold_df))
@@ -147,12 +161,31 @@ def run() -> None:
                     entry_train["label"].iloc[0],
                 )
             else:
-                entry_result = train_entry_model(entry_train, entry_test)
-                logger.info("[%s] ENTRY MODEL metrics: %s", token, entry_result.metrics)
-                joblib.dump(entry_result.model, MODELS_DIR / f"entry_{token}.joblib")
-                joblib.dump(
-                    entry_result.scaler, MODELS_DIR / f"entry_scaler_{token}.joblib"
-                )
+                with mlflow.start_run(run_name=f"entry_{token}"):
+                    entry_result = train_entry_model(entry_train, entry_test)
+                    logger.info(
+                        "[%s] ENTRY MODEL metrics: %s", token, entry_result.metrics
+                    )
+                    joblib.dump(
+                        entry_result.model, MODELS_DIR / f"entry_{token}.joblib"
+                    )
+                    joblib.dump(
+                        entry_result.scaler, MODELS_DIR / f"entry_scaler_{token}.joblib"
+                    )
+
+                    mlflow.log_params(
+                        {
+                            "token": token,
+                            "model_type": "entry",
+                            "horizon": ENTRY_HORIZON,
+                            "upper_pct": ENTRY_UPPER_PCT,
+                            "lower_pct": ENTRY_LOWER_PCT,
+                            "train_rows": len(entry_train),
+                            "test_rows": len(entry_test),
+                        }
+                    )
+                    mlflow.log_metrics(entry_result.metrics)
+                    mlflow.sklearn.log_model(entry_result.model, name="model")
         else:
             logger.warning(
                 "[%s] not enough usable rows (%d) to train entry model - skipping",
@@ -183,12 +216,29 @@ def run() -> None:
                     exit_train["exit_label"].iloc[0],
                 )
             else:
-                exit_result = train_exit_model(exit_train, exit_test)
-                logger.info("[%s] EXIT MODEL metrics: %s", token, exit_result.metrics)
-                joblib.dump(exit_result.model, MODELS_DIR / f"exit_{token}.joblib")
-                joblib.dump(
-                    exit_result.scaler, MODELS_DIR / f"exit_scaler_{token}.joblib"
-                )
+                with mlflow.start_run(run_name=f"exit_{token}"):
+                    exit_result = train_exit_model(exit_train, exit_test)
+                    logger.info(
+                        "[%s] EXIT MODEL metrics: %s", token, exit_result.metrics
+                    )
+                    joblib.dump(exit_result.model, MODELS_DIR / f"exit_{token}.joblib")
+                    joblib.dump(
+                        exit_result.scaler, MODELS_DIR / f"exit_scaler_{token}.joblib"
+                    )
+
+                    mlflow.log_params(
+                        {
+                            "token": token,
+                            "model_type": "exit",
+                            "holding_period": EXIT_HOLDING_PERIOD,
+                            "horizon": EXIT_HORIZON,
+                            "decline_threshold": EXIT_DECLINE_THRESHOLD,
+                            "train_rows": len(exit_train),
+                            "test_rows": len(exit_test),
+                        }
+                    )
+                    mlflow.log_metrics(exit_result.metrics)
+                    mlflow.sklearn.log_model(exit_result.model, name="model")
         else:
             logger.warning(
                 "[%s] not enough usable rows (%d) to train exit model - skipping",

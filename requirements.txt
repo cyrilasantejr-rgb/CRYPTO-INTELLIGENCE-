@@ -23,6 +23,9 @@ kafka-python-ng>=2.2
 # Phase 11: news intelligence (RSS-based)
 feedparser>=6.0
 
+# Phase 14: MLOps - experiment tracking and model registry
+mlflow>=2.15
+
 # Phase 5: backtesting (pandas/pyarrow already satisfy this - no new deps)
 
 # Phase 6: baseline entry/exit ML

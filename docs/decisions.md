@@ -1070,3 +1070,73 @@ partial-sell semantic, immutability of returned Position objects,
 input validation, and full-close-via-100%-sell behavior), 6 for
 position_store.py (real SQLite round-trips). 174/174 tests passing
 overall, lint/format clean.
+
+---
+
+## ADR-035: champion/challenger promotion - multi-criteria, not single-metric
+
+**Context**: Phase 14 needed to implement the project's explicit MLOps
+requirement: "Never automatically replace a better model with a worse
+model merely because the newer model was trained more recently."
+
+**Decision**: `model_retraining/promotion_logic.py` requires TWO
+conditions before promoting a challenger, not one:
+1. ROC-AUC must improve by at least a minimum threshold (0.02) -
+   not just any positive difference, since a coin-flip-sized
+   improvement isn't reliable evidence of a real improvement.
+2. Calibration (Brier score) must not regress beyond a small tolerance
+   (0.01), even if ROC-AUC improved.
+
+**Why the second criterion matters, concretely**: a model can improve
+ROC-AUC (its ability to RANK predictions correctly) while becoming
+worse-calibrated (its predicted probabilities becoming less accurate as
+actual probabilities) - for example, by pushing predictions toward more
+extreme, overconfident values. Verified with a test constructing exactly
+this case (`test_improved_auc_but_regressed_calibration_is_rejected`) -
+a challenger with meaningfully better ROC-AUC but meaningfully worse
+Brier score is correctly REJECTED, not promoted on the ROC-AUC
+improvement alone.
+
+**Missing-data handling, same principle as every scoring module built
+tonight**: a missing PRIMARY metric (ROC-AUC) blocks promotion entirely
+(can't evaluate without it); a missing SECONDARY metric (Brier score)
+skips only that check, still allowing promotion based on ROC-AUC alone
+- an unavailable secondary signal shouldn't block a clear primary-signal
+improvement, but an unavailable primary signal genuinely can't be
+worked around.
+
+## ADR-036: MLflow with SQLite backend - same pattern as Phase 13
+
+**Context**: Phase 14 needed real experiment tracking and model
+registry functionality, per the project's original MLOps design
+("Use MLflow for: experiments, metrics, parameters, artifacts, model
+versions, model registry, model lineage").
+
+**Decision**: `sqlite:///mlflow.db` as the tracking URI - a single
+local file, not a separate MLflow tracking server. Same reasoning as
+Phase 13's position storage (ADR-033): this project's actual scale (one
+user, local experimentation) doesn't need a server, and SQLite backend
+still provides MLflow's full experiment tracking and model registry
+capability, not a reduced feature set. Production alternative, stated
+plainly: run `mlflow server` with a proper backend store if this ever
+needs multi-user/remote access.
+
+**A separate, simpler local "champion registry" (JSON file) exists
+ALONGSIDE MLflow, not instead of it** - deliberately, not redundantly:
+MLflow tracks every run's full history/lineage regardless of promotion
+status (the point of an experiment tracker); the champion registry
+tracks only "which one is currently the champion" for fast lookup
+during a promotion check, without needing to query MLflow's run history
+to reconstruct that state each time.
+
+**Verified end-to-end with real MLflow, not mocks**: logged two actual
+runs to a real MLflow SQLite-backed tracking store, then ran the actual
+`run_promotion_check.run()` function against them (not a simulated
+version) - confirmed the "no champion yet, promote automatically" path
+AND the "genuinely better challenger, promote with correct reasons"
+path both work correctly against MLflow's real `search_runs()` query
+mechanism, not just against hand-constructed metric dicts in unit tests.
+
+25 new tests (10 for promotion decision logic including the calibration-
+gaming rejection case; 5 for the champion registry's real file I/O).
+189/189 tests passing overall, lint/format clean.
