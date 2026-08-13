@@ -824,3 +824,50 @@ fields exist in the same base `info` object regardless of extensions),
 but wouldn't surface extension-specific risks like transfer restrictions
 or built-in fees - a genuinely separate, more involved piece of parsing
 not built here.
+
+---
+
+## ADR-029: News intelligence - deterministic keyword classification, sentiment kept separate from credibility
+
+**Context**: Phase 11 needed to fetch and classify crypto news - event
+type (hack, partnership, listing, etc.) and enough context to judge
+whether a headline should actually be trusted.
+
+**Provider**: CryptoPanic (free tier, community-vote-based sentiment
+built in) rather than building a custom sentiment model - avoids
+needing an LLM/ML pipeline for something a purpose-built news aggregator
+already does, consistent with this project's "don't build what a
+reasonable existing tool already provides" approach.
+
+**Classification approach**: deterministic keyword rules
+(`news_intelligence/news_classification.py`), not an LLM or ML model -
+same "deterministic rules first" philosophy as the Phase 10 security
+engine's mint/freeze authority checks. Every rule is a short, auditable
+keyword list a human can read and verify; there's no black box to
+debug when a headline gets misclassified.
+
+**Core design decision, directly from the project's original
+requirement ("do not equate sentiment with credibility")**: event type
+and source credibility are computed as two INDEPENDENT dimensions, not
+blended into one score. A sensational headline from an unknown blog and
+a terse announcement from a reputable outlet about the same real event
+must be distinguishable - collapsing them into one number would hide
+exactly that distinction. Verified with a test asserting a hack
+headline from an unknown domain correctly reports `event_type=hack` AND
+`credibility=UNKNOWN` independently, neither dimension affecting the
+other's classification.
+
+**Credibility list is a deliberately small, conservative starting
+point** (a handful of well-known outlets), not an authoritative
+database - a domain not on the list is `UNKNOWN`, never automatically
+treated as low-credibility. Absence of a rating is different from a bad
+rating, the same "missing data isn't the worst case" principle used
+throughout this project's scoring logic (Phase 9's concentration tiers,
+Phase 10's rug-risk score).
+
+**Honest limitation, same pattern as tonight's other integrations under
+time pressure**: CryptoPanic's exact API plan slug and response field
+names are based on their long-standing, generally documented API shape,
+not a live-verified response - built this way given real time
+constraints tonight. Some adjustment after the first live run should be
+expected, same as several other integrations tonight.
