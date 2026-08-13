@@ -633,3 +633,46 @@ here because the real output was checked against real-world intuition
 checking that the code ran without crashing - a reminder that "the
 script runs and prints a number" and "the number is correct" are
 different bars, especially for anything feeding into risk decisions.
+
+---
+
+## ADR-025: Dev-wallet outflow detection - scope and honest limitations
+
+**Context**: Phase 9's remaining piece needed a way to detect whether a
+token's dev/creator wallet (or any monitored wallet) is selling off or
+moving out their holdings - a well-known rug-pull warning sign.
+
+**Provider decision**: Helius (dashboard.helius.dev), not Birdeye -
+Birdeye's wallet endpoints are aggregated PnL/net-worth summaries, not
+raw transaction history. Checked Helius's actual pricing/access before
+building (same discipline as ADR-019/021 after getting burned by
+assuming Birdeye tier access): free tier is 1M credits/month, no card
+required, and covers the Enhanced Transactions endpoint used here.
+
+**Scope decision, stated plainly**: this detects raw token OUTFLOWS
+from a wallet - transfers where the monitored wallet is the sender. It
+deliberately does NOT yet distinguish "sold on a DEX" from "transferred
+to another wallet they also control" from "sent to a known exchange" -
+all three look identical from this wallet's perspective (token left),
+but mean different things. That distinction needs either DEX-swap-
+specific transaction-type parsing or wallet-clustering analysis (tracing
+where the money goes next) - both genuinely separate pieces of future
+work, not silently skipped, just not built in this slice. What's built
+answers the narrower, still genuinely useful question: "is this token
+leaving this wallet, how much, and how recently."
+
+**Honest limitation, same as every other Phase 9 piece tonight**: the
+Helius adapter's field names (`tokenTransfers`, `fromUserAccount`,
+`mint`, `tokenAmount`, `timestamp`) are based on Helius's documented
+schema, not yet verified against a live response - this sandbox has no
+route to Helius either. Given tonight's pattern (Birdeye's real
+responses differed from docs in real, if minor, ways three separate
+times), some field-name adjustment after the first live run should be
+expected here too, not treated as a surprise if it happens.
+
+**What IS thoroughly verified**: the pure outflow-detection logic (9
+tests covering incoming-vs-outgoing correctly excluded, unrelated
+tokens correctly ignored, multi-transaction summing, recency-window
+correctness, and graceful handling of missing/malformed transaction
+data) and the adapter's request/retry construction (4 tests, mocked
+HTTP).

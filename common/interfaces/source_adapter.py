@@ -100,3 +100,27 @@ class HolderDataAdapter(ABC):
         summary stats (e.g. top-10 concentration percentage).
         """
         raise NotImplementedError
+
+
+class WalletTransactionAdapter(ABC):
+    """
+    Interface for any vendor that provides parsed/enhanced transaction
+    history for a Solana wallet - a fundamentally different domain from
+    token price/holder data (MarketDataAdapter, RealtimePriceAdapter,
+    HolderDataAdapter above): this is about WALLET BEHAVIOR over time,
+    not token-level snapshots.
+    """
+
+    source_name: str
+
+    @abstractmethod
+    def fetch_transactions(
+        self, wallet_address: str, limit: int = 100
+    ) -> BronzeEnvelope:
+        """
+        Fetch recent transaction history for a wallet, returning one
+        BronzeEnvelope whose payload contains the raw list of parsed
+        transactions (whatever shape the vendor's "enhanced"/parsed
+        format provides - token transfers, timestamps, transaction type).
+        """
+        raise NotImplementedError
