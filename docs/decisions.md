@@ -1010,3 +1010,63 @@ API call.
 non-override BUY/HOLD/AVOID paths, missing-signal handling, and the
 explicit-reasons-not-hidden-scoring property). 148/148 tests passing
 overall, lint/format clean.
+
+---
+
+## ADR-033: SQLite for paper-trading positions, not the original PostgreSQL plan
+
+**Context**: Phase 13 needed positions to persist BETWEEN separate
+script runs - a genuinely new requirement, different from almost
+everything built so far tonight (mostly stateless fetch-and-report).
+The project's original stack mentions PostgreSQL for exactly this kind
+of relational/transactional data.
+
+**Decision**: SQLite - a single local file, zero setup - not a
+PostgreSQL server. This project's actual scale (one user, a personal
+paper-trading ledger, a modest number of positions) doesn't need a
+database server at all. Production alternative, stated plainly per this
+project's cost-awareness practice: PostgreSQL, if this project ever
+needs multi-user or concurrent access - genuinely unnecessary for what
+this is right now.
+
+**Verified with a real database, not mocks**: `test_position_store.py`
+uses an actual temporary SQLite file per test (not a mocked connection)
+- the round-trip test in particular (open a position, take a partial
+profit, save, reload, and assert every field including the nested
+`profit_taking_history` list survives correctly) is exactly the kind of
+persistence-layer test that's worth running against the real thing,
+since JSON serialization of nested data is a common, easy place for a
+silent bug to hide.
+
+## ADR-034: partial-sell semantics - relative to remaining size, not original
+
+**Context**: the project's original design says "Support staged profit
+taking. Example: sell 20%, hold 80%." - but doesn't specify what a
+SECOND "sell 20%" means after the first sale: 20% of the original
+position, or 20% of what's left now?
+
+**Decision**: `take_partial_profit()`'s `sell_fraction` is always
+relative to the position's CURRENT remaining size, not its original
+entry size. Stated explicitly in the module docstring rather than left
+implicit, since this is exactly the kind of ambiguity that's easy to
+get wrong silently - two reasonable people could read "sell 20%"
+differently, and the code needs one specific, documented answer.
+
+**Why this interpretation**: it's the only one that stays well-defined
+after multiple partial sells - a fixed original-size percentage could
+eventually try to sell more than remains. It also matches how a person
+naturally describes staged profit-taking in conversation ("I'll sell
+another 20% here" naturally means 20% of what I still have, not 20% of
+what I started with).
+
+**Verified explicitly**: a dedicated test (`test_second_partial_sell_
+is_relative_to_remaining_not_original`) opens a position, sells 50%,
+then sells 50% again, and asserts the remaining size is 25% of the
+original (50% of the remaining 50%) - not 0% (which a
+naive-original-size interpretation would produce on a second 50% sale).
+
+19 tests for position_math.py (P&L calculation correctness, the
+partial-sell semantic, immutability of returned Position objects,
+input validation, and full-close-via-100%-sell behavior), 6 for
+position_store.py (real SQLite round-trips). 174/174 tests passing
+overall, lint/format clean.
