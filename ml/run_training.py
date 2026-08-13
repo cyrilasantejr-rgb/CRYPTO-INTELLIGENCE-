@@ -115,6 +115,31 @@ def _load_gold_as_pandas(store: ObjectStoreClient) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def _log_metrics_safely(metrics: dict) -> None:
+    """
+    MLflow's log_metrics() rejects None values outright (it requires an
+    actual float per metric) - but this project's models legitimately
+    return None for roc_auc when a test set has zero positive examples
+    (undefined ROC-AUC, not a bug - see ml/entry/train.py). Filtering
+    None values out here, with a clear log line about what was skipped
+    and why, keeps that already-correct "return None, don't crash"
+    behavior intact instead of MLflow's stricter validation crashing
+    the whole training run over a value that was always going to be
+    unavailable for this particular run.
+    """
+    skipped = [key for key, value in metrics.items() if value is None]
+    if skipped:
+        logger.warning(
+            "Skipping MLflow logging for metric(s) with undefined value "
+            "(None): %s - this is expected when a test set has zero "
+            "positive examples, not an error",
+            skipped,
+        )
+    loggable = {key: value for key, value in metrics.items() if value is not None}
+    if loggable:
+        mlflow.log_metrics(loggable)
+
+
 def run() -> None:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
@@ -184,7 +209,7 @@ def run() -> None:
                             "test_rows": len(entry_test),
                         }
                     )
-                    mlflow.log_metrics(entry_result.metrics)
+                    _log_metrics_safely(entry_result.metrics)
                     mlflow.sklearn.log_model(entry_result.model, name="model")
         else:
             logger.warning(
@@ -237,7 +262,7 @@ def run() -> None:
                             "test_rows": len(exit_test),
                         }
                     )
-                    mlflow.log_metrics(exit_result.metrics)
+                    _log_metrics_safely(exit_result.metrics)
                     mlflow.sklearn.log_model(exit_result.model, name="model")
         else:
             logger.warning(

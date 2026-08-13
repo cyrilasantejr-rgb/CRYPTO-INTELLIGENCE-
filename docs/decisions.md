@@ -1140,3 +1140,43 @@ mechanism, not just against hand-constructed metric dicts in unit tests.
 25 new tests (10 for promotion decision logic including the calibration-
 gaming rejection case; 5 for the champion registry's real file I/O).
 189/189 tests passing overall, lint/format clean.
+
+---
+
+## ADR-037: MLflow rejects `None` metric values - a real integration gap between two already-correct pieces of code
+
+**Context**: Real run of `ml.run_training` (now with MLflow tracking
+from Phase 14) crashed with `MlflowException: Missing value for
+required parameter 'metrics[3].value'` while training the entry model.
+
+**Root cause**: two separately-correct pieces of code that had never
+been run together before. Phase 6's training code already correctly
+returns `roc_auc: None` when a test set has zero positive examples
+(ROC-AUC is mathematically undefined in that case - a deliberate,
+already-tested "return None, don't crash" design, not a bug). Phase
+14's new MLflow logging code, written without accounting for this
+pre-existing possibility, passed that `None` straight to
+`mlflow.log_metrics()` - which validates every metric value must be an
+actual float and rejects `None` outright. Neither piece of code was
+individually wrong; the integration between them was.
+
+**Fix**: `_log_metrics_safely()` filters out `None`-valued metrics
+before calling MLflow, logging a clear warning explaining exactly which
+metric was skipped and why ("this is expected when a test set has zero
+positive examples, not an error") - same "fail informatively, keep the
+None-means-undefined signal intact rather than silently dropping it or
+crashing" pattern used throughout this project.
+
+**Verified by exactly reproducing the real failure, not just reasoning
+about it**: constructed the identical metrics dict from the real crash
+(including the literal `roc_auc: None`) and confirmed the fixed code
+path logs the other 6 valid metrics successfully with no crash, before
+this fix was considered done.
+
+**Process note**: this is a good illustration of why the "run it for
+real before considering it finished" discipline matters even when both
+halves of an integration have already been individually tested -
+`ml.run_training`'s existing test suite never exercised the
+zero-positive-examples-in-test-set case at the SAME time as the new
+MLflow logging code, because that specific combination only actually
+occurred with this project's real, current data distribution.
