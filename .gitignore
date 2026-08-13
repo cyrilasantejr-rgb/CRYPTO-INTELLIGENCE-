@@ -34,3 +34,7 @@ logs/
 
 # Phase 13: local SQLite paper-trading database
 data/
+
+# Phase 14: local MLflow tracking database and artifact store
+mlflow.db
+mlruns/
