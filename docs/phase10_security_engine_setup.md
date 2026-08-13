@@ -39,24 +39,17 @@ a token straight to CRITICAL alone. The output always shows:
   silently hidden, since a score built on partial data should be
   understood as less complete, not treated as equally reliable
 
-## Known limitation
+## Known limitation (resolved for the core case)
 
-The token security endpoint (`/defi/token_security`) requires a paid
-Birdeye tier - confirmed via a real 401 response using the same key
-that works on every other endpoint in this project (see ADR-027). This
-is NOT a bug and NOT something you need to fix: the composite scoring
-engine was built from the start to treat a missing signal as an honest,
-labeled data gap rather than a crash or an assumed worst case, and this
-is exactly that design working correctly under real conditions.
+Mint/freeze authority now reads directly from Solana's own on-chain
+data via Helius's RPC (`getAccountInfo`, `jsonParsed` encoding) - see
+ADR-028. This replaced the original Birdeye-based approach, which
+turned out to require a paid tier (ADR-027). Requires `HELIUS_API_KEY`
+to be set; without it, this signal is skipped and recorded as a data
+gap, same graceful-degradation behavior as any other missing signal.
 
-Running the security check will still produce a complete, correctly-
-scored report - just with mint/freeze authority listed under "Data
-gaps" rather than contributing to the score. Holder concentration and
-dev-wallet outflow monitoring (if a dev wallet is provided) are
-unaffected and will still work normally.
-
-A genuine free alternative exists as future work (see ADR-027): mint
-and freeze authority are on-chain SPL Token mint account fields,
-queryable directly via any Solana RPC's `getAccountInfo` - including
-Helius's own RPC, already set up in this project - with no paid tier
-needed. Not built yet; a clear next step, not a dead end.
+Remaining limitation: this reads the base SPL Token mint layout
+correctly (works for essentially all tokens, including Token-2022
+mints' mint/freeze authority specifically), but doesn't yet parse
+Token-2022 extension-specific risks (transfer fees, transfer hooks,
+etc.) - a separate, more involved piece of work, not built yet.

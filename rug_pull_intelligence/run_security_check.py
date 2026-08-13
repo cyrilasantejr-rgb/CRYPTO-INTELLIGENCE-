@@ -27,8 +27,9 @@ import os
 
 from dotenv import load_dotenv
 
-from rug_pull_intelligence.birdeye_security_adapter import BirdeyeSecurityAdapter
+from rug_pull_intelligence.mint_authority import parse_mint_authority_flags
 from rug_pull_intelligence.security_scoring import compute_rug_risk_score
+from rug_pull_intelligence.solana_rpc_adapter import SolanaMintInfoAdapter
 from wallet_intelligence.birdeye_holder_adapter import BirdeyeHolderAdapter
 from wallet_intelligence.dev_wallet_monitor import analyze_outflows
 from wallet_intelligence.helius_wallet_adapter import HeliusWalletAdapter
@@ -69,49 +70,32 @@ def _get_dev_outflow_flag(
 
 
 def _get_authority_flags(
-    birdeye_key: str, token_address: str
+    helius_key: str, token_address: str
 ) -> tuple[bool | None, bool | None]:
     """
-    Returns (mint_authority_active, freeze_authority_active). Both None
-    if the fetch fails OR if none of the plausible field names are found
-    in the response - see ADR-026 for why this endpoint's exact field
-    names aren't confirmed yet.
+    Returns (mint_authority_active, freeze_authority_active), read
+    directly from the token's on-chain mint account via Solana RPC - see
+    ADR-027 for why this replaced the original Birdeye-based approach
+    (that endpoint requires a paid tier this project's account doesn't
+    have) and mint_authority.py's docstring for why on-chain RPC is
+    actually the more trustworthy source anyway, not just a workaround.
     """
     try:
-        adapter = BirdeyeSecurityAdapter(api_key=birdeye_key)
-        envelope = adapter.fetch_security_info(token_address)
-        payload = envelope.payload
-
-        # Defensive: check several plausible field name variants, since
-        # this endpoint's exact schema isn't confirmed (ADR-026). Log the
-        # raw payload if none match, so the actual field names are
-        # visible for a quick follow-up fix - same pattern that worked
-        # for the holder endpoint earlier tonight.
-        mint_candidates = ["mintAuthority", "mint_authority", "mutableMetadata"]
-        freeze_candidates = ["freezeAuthority", "freeze_authority", "freezeable"]
-
-        mint_active = None
-        for key in mint_candidates:
-            if key in payload:
-                mint_active = bool(payload[key])
-                break
-
-        freeze_active = None
-        for key in freeze_candidates:
-            if key in payload:
-                freeze_active = bool(payload[key])
-                break
+        adapter = SolanaMintInfoAdapter(helius_api_key=helius_key)
+        envelope = adapter.fetch_mint_info(token_address)
+        mint_active, freeze_active = parse_mint_authority_flags(envelope.payload)
 
         if mint_active is None and freeze_active is None:
             logger.warning(
-                "None of the expected mint/freeze authority fields were "
-                "found in the security response. Raw payload: %s",
-                payload,
+                "Could not parse mint/freeze authority from the RPC response "
+                "for %s - raw payload: %s",
+                token_address,
+                envelope.payload,
             )
 
         return mint_active, freeze_active
     except Exception:
-        logger.exception("Failed to fetch token security data")
+        logger.exception("Failed to fetch on-chain mint authority data")
         return None, None
 
 
@@ -133,7 +117,14 @@ def run(token_address: str, dev_wallet: str | None) -> None:
         else:
             dev_outflow = _get_dev_outflow_flag(helius_key, dev_wallet, token_address)
 
-    mint_active, freeze_active = _get_authority_flags(birdeye_key, token_address)
+    mint_active, freeze_active = (None, None)
+    if helius_key:
+        mint_active, freeze_active = _get_authority_flags(helius_key, token_address)
+    else:
+        logger.warning(
+            "HELIUS_API_KEY not set - mint/freeze authority check skipped "
+            "(this now uses on-chain RPC, not Birdeye - see ADR-027)"
+        )
 
     assessment = compute_rug_risk_score(
         holder_concentration_tier=concentration_tier,
