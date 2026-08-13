@@ -18,11 +18,11 @@ def test_fetch_top_holders_returns_envelope_with_holder_domain():
         {
             "data": {
                 "items": [
-                    {"owner": "WalletA", "ui_amount": 1000.0},
-                    {"owner": "WalletB", "ui_amount": 500.0},
+                    {"owner": "WalletA", "amount": 1000.0},
+                    {"owner": "WalletB", "amount": 500.0},
                 ],
                 "holder": 2,
-                "top10HoldPercent": 100.0,
+                "top10_hold_percent": 100.0,
             }
         },
     )

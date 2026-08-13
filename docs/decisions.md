@@ -561,3 +561,34 @@ verified. The exact response field names (`items`, `ui_amount`,
 `top10HoldPercent`) are based on Birdeye's published API reference, not
 a live-tested response - this is the first real test of this exact
 endpoint shape, on the actual Mac.
+
+---
+
+## ADR-023: Real Birdeye holder response uses snake_case, not camelCase
+
+**Context**: ADR-022 flagged honestly that the holder adapter's field
+names (`ui_amount`, `top10HoldPercent`) were based on Birdeye's written
+API reference, not a live-tested response, since this sandbox can't
+reach birdeye.so. Running it for real produced a working response with
+real data (3.3 million SOL holders, top-10 concentration of 1.2% -
+consistent with SOL being a widely-distributed base asset, not a
+concentrated token) but the code reported "no holder amounts returned"
+and dumped the raw payload instead of computing metrics.
+
+**Root cause**: the real API response uses snake_case field names
+(`amount`, `top10_hold_percent`) rather than the camelCase the written
+docs implied (`ui_amount`, `top10HoldPercent`). The `items` wrapper key
+and `owner` field were correctly guessed; only the amount and top-level
+percentage field names were wrong.
+
+**Decision**: fixed the parsing to use the real field names, confirmed
+against the actual live response rather than the docs page.
+
+**Process note**: this is now the third time in this project that a
+vendor's actual behavior differed from its written documentation
+(WebSocket tier access, multi_price tier access, and now this field-
+naming mismatch). The pattern holding up across all three: code that
+fails informatively (a clear warning + the raw payload printed) rather
+than silently or by crashing made each of these fast to diagnose and
+fix once actually run - worth continuing to write vendor-integration
+code this way as standard practice, not just for Birdeye.
