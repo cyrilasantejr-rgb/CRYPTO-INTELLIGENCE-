@@ -676,3 +676,50 @@ tokens correctly ignored, multi-transaction summing, recency-window
 correctness, and graceful handling of missing/malformed transaction
 data) and the adapter's request/retry construction (4 tests, mocked
 HTTP).
+
+---
+
+## ADR-026: Phase 10 security engine - composite scoring, uncertain field names handled defensively
+
+**Context**: Phase 10 needed to combine the signals built across Phase 9
+(holder concentration, dev-wallet outflow detection) with new token
+security metadata (mint/freeze authority) into one final RUG_RISK_SCORE,
+per the project's original design.
+
+**Composite scoring decision**: implemented in
+`rug_pull_intelligence/security_scoring.py` as a pure, fully-tested
+function taking each signal as an explicit parameter (not fetched
+internally), with three deliberate properties:
+1. **Points are capped per-signal**, so no single red flag - even the
+   worst possible value of one signal alone - can push an otherwise-
+   clean token straight to CRITICAL. Reaching the highest tiers requires
+   multiple independent signals agreeing something is wrong. Verified
+   with a test asserting exactly this (`CRITICAL` holder concentration
+   alone scores 50/100, not 100).
+2. **A missing signal contributes zero points, never the worst case** -
+   an API failure or a vendor field that couldn't be found must not be
+   silently treated as "assume the worst," which would make the score
+   unreliable in exactly the situations (partial data) where honesty
+   about uncertainty matters most.
+3. **Every point-contributing signal is named in a human-readable
+   `reasons` list** - no hidden weighting a person reading the output
+   can't audit, consistent with the project's "every recommendation
+   must be explainable" requirement stated from the very start.
+
+**Uncertain field names, handled upfront rather than discovered later**:
+`/defi/token_security`'s exact response schema isn't confirmed - the
+docs page renders its example response via JavaScript this project's
+tooling can't execute, and given three separate real-vs-documented
+Birdeye mismatches already tonight, there's no reason to assume this
+endpoint is different. Rather than guess one field name and find out
+it's wrong on the first live run (as happened with the holder endpoint),
+`run_security_check.py` checks several plausible field name variants
+for mint/freeze authority (`mintAuthority`/`mint_authority`/
+`mutableMetadata`, `freezeAuthority`/`freeze_authority`/`freezeable`)
+and logs the full raw payload if none match - the same "fail
+informatively, not silently" pattern that made every other Birdeye
+field-name issue tonight fast to diagnose and fix.
+
+**Honest expectation**: given tonight's track record, some adjustment
+to these field-name guesses after the first real run should be expected,
+not treated as a surprise.
