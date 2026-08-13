@@ -592,3 +592,44 @@ fails informatively (a clear warning + the raw payload printed) rather
 than silently or by crashing made each of these fast to diagnose and
 fix once actually run - worth continuing to write vendor-integration
 code this way as standard practice, not just for Birdeye.
+
+---
+
+## ADR-024: Total-supply denominator, not top-100-sample denominator, for the risk verdict
+
+**Context**: Running the holder analysis for real on SOL produced two
+wildly disagreeing numbers: our own computed top-10 concentration said
+83.5% (CRITICAL), while Birdeye's own reported `top10_hold_percent` said
+1.2% (correctly LOW, matching reality - SOL is a massive, widely-
+distributed base asset, not a concentrated token).
+
+**Root cause**: `fetch_top_holders` only fetches the top 100 holders
+(a vendor-imposed page size, not total supply). The original
+`compute_concentration_metrics` computed "top 10 as a % of the SUM OF
+THE FETCHED LIST" - i.e. top 10 as a share of just those 100 holders'
+combined balance, not as a share of the token's actual total circulating
+supply. With millions of real holders excluded from the sample, that
+denominator is far too small, inflating the percentage by roughly 70x
+in this case. Birdeye's own `top10_hold_percent` is correctly computed
+against real total supply.
+
+**Decision**: the actual risk verdict (`risk_tier` shown to the user)
+now comes from Birdeye's own `top10_hold_percent`, run through the same
+`classify_risk_tier()` function for consistent tier logic. The locally-
+computed sample-relative metrics (top10% and HHI among the fetched top
+100) are kept and still shown, but explicitly relabeled as a
+supplementary "concentration among the sampled whales themselves"
+signal - a legitimate, different, and still useful number (it answers
+"even among the biggest holders, is ownership itself lopsided?"), just
+not comparable to a total-supply-based percentage and not what drives
+the risk tier.
+
+**Why this matters more than a typical bug**: this is a security/risk-
+assessment tool. A wrong "CRITICAL" verdict on a token that's actually
+fine is exactly the kind of false alarm that erodes trust in the whole
+system (or worse, a wrong "LOW" on something genuinely dangerous). Caught
+here because the real output was checked against real-world intuition
+(SOL should not show as critically concentrated) rather than just
+checking that the code ran without crashing - a reminder that "the
+script runs and prints a number" and "the number is correct" are
+different bars, especially for anything feeding into risk decisions.
