@@ -897,3 +897,50 @@ actually how the API works.
 pressure, fix quickly once real evidence appears" pattern working as
 intended - the fix took one search (finding real working code, not more
 guessing) and a small, isolated change, not a redesign.
+
+---
+
+## ADR-031: CryptoPanic free tier discontinued - switched to RSS feeds, no API key needed
+
+**Context**: Real run of the CryptoPanic adapter (fixed to the correct
+`/api/v1/posts/` URL in ADR-030) still returned `403 Forbidden`.
+Checking CryptoPanic's own API Reference page directly (not docs text
+alone, but the actual authenticated reference page) showed a first-
+party notice: **"The free Developer API plan is discontinued and will
+be removed on April 1st, 2026. Please upgrade to a paid plan to
+continue using the API."** The 403 was correct the whole time - this
+wasn't a URL or field-name bug at all, the free tier itself no longer
+exists.
+
+**Decision**: switched to RSS feeds from established crypto news
+outlets (Cointelegraph, CoinDesk), parsed with `feedparser` - a mature,
+extremely stable Python library, not a hand-rolled XML parser.
+
+**Why this is structurally safer, not just a workaround**: RSS is a
+decades-old, standardized format. Every vendor-specific fix needed
+tonight (Birdeye's holder/security field names, CryptoPanic's URL
+structure) came from guessing at ONE company's particular, evolving
+REST API shape. `feedparser` normalizes RSS/Atom variations into a
+consistent set of fields (`entry.title`, `entry.link`, `entry.summary`,
+`entry.published_parsed`) regardless of which outlet's raw XML looks
+like - the specific uncertainty that caused repeated fixes tonight
+doesn't apply the same way here, since the library's own stable
+interface is what's being relied on. It also needs no API key, no
+signup, and can't be discontinued out from under this project the way
+a single vendor's free tier just was.
+
+**Verification note, different from tonight's other adapters**: unlike
+most other integrations tonight (built against docs alone, unverified
+until a live run), this was tested against REAL feedparser parsing of a
+real, valid RSS XML string (not a mock of feedparser's output) - 8
+tests, including one confirming a failing feed doesn't block results
+from a working one. The one thing NOT verified without live network
+access is whether Cointelegraph/CoinDesk's actual current feeds are
+reachable and well-formed right now - `feedparser` itself is proven
+correct against realistic RSS structure either way.
+
+**CryptoPanic code left in place**: `cryptopanic_adapter.py` and its
+tests are still correct, tested, and useful reference for anyone who
+does have a paid CryptoPanic plan - just no longer called by the
+runner, same pattern as the earlier Birdeye security adapter after
+ADR-027.
