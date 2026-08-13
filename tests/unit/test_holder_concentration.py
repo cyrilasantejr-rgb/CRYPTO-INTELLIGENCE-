@@ -1,4 +1,19 @@
-from wallet_intelligence.holder_concentration import compute_concentration_metrics
+from wallet_intelligence.holder_concentration import (
+    classify_risk_tier,
+    compute_concentration_metrics,
+)
+
+
+def test_classify_risk_tier_matches_compute_concentration_metrics():
+    """classify_risk_tier is used standalone (against Birdeye's own
+    total-supply-based top10_hold_percent) as well as internally by
+    compute_concentration_metrics - both paths must agree for the same
+    input percentage."""
+    assert classify_risk_tier(0.15) == "LOW"
+    assert classify_risk_tier(0.25) == "MODERATE"
+    assert classify_risk_tier(0.50) == "HIGH"
+    assert classify_risk_tier(0.70) == "VERY_HIGH"
+    assert classify_risk_tier(0.90) == "CRITICAL"
 
 
 def test_empty_holder_list_returns_zero_not_crash():
