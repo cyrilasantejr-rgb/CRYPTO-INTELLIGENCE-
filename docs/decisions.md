@@ -723,3 +723,53 @@ field-name issue tonight fast to diagnose and fix.
 **Honest expectation**: given tonight's track record, some adjustment
 to these field-name guesses after the first real run should be expected,
 not treated as a surprise.
+
+---
+
+## ADR-027: `/defi/token_security` requires a paid tier - and the composite engine handled it correctly without any code change
+
+**Context**: Running the full Phase 10 composite report for the first
+time produced a `401` on `/defi/token_security`, using the same API key
+that works on every other Birdeye endpoint in this project.
+
+**Finding**: this is the fourth time tonight a Birdeye endpoint's real
+access requirements didn't match what was assumed or documented
+(after WebSocket access, `multi_price`, and holder response field
+casing). The evidence pattern - identical key, working everywhere else,
+failing only here - matches the same paid-tier-restriction shape as
+`multi_price` earlier tonight. Treating this as confirmed: token
+security metadata (mint/freeze authority) is not available on the free
+Standard tier.
+
+**What actually happened next is the interesting part**: no code change
+was needed. `compute_rug_risk_score()` was built from the start (this
+same session, a few hours earlier) to treat a missing signal as a
+recorded data gap contributing zero points - not a crash, not an
+assumed worst case. The real run proved this design decision correct
+under real conditions, not just under test: holder concentration and
+dev-wallet outflow both succeeded, security metadata failed, and the
+system produced a complete, correctly-scored, honestly-labeled report
+anyway (25/100 MODERATE, with both missing signals clearly listed as
+data gaps rather than hidden).
+
+**Decision**: no adapter/scoring code changes needed. Documenting this
+tier limitation here for the record, and noting a genuine, free
+alternative worth pursuing as future work rather than immediately: mint
+authority and freeze authority are literally fields in an SPL Token
+mint account's on-chain data - queryable directly via any Solana RPC's
+`getAccountInfo` (including Helius's own RPC, already integrated and
+already free) with no paid Birdeye tier required at all. This would
+also arguably be a MORE trustworthy source than a third-party's security
+summary, since it reads the actual on-chain account data directly rather
+than through an intermediary's interpretation. Not built tonight -
+raw SPL account layout parsing is genuinely new, separate work, not a
+quick addition at the end of an already very long session - but a clear,
+concrete next step rather than a dead end.
+
+**Process reflection, after four of these tonight**: checking a vendor's
+actual documented tier-access table before writing code (as done for
+WebSocket and `multi_price`) catches some of these; some, like this one
+and the holder field-casing issue, only surface on a real run no matter
+how carefully the docs are checked beforehand. Both are worth continuing
+as practice - check first when possible, and build every integration to
+degrade honestly when a real run reveals something docs didn't show.
