@@ -944,3 +944,69 @@ tests are still correct, tested, and useful reference for anyone who
 does have a paid CryptoPanic plan - just no longer called by the
 runner, same pattern as the earlier Birdeye security adapter after
 ADR-027.
+
+---
+
+## ADR-032: Phase 12 decision engine - explicit overrides checked first, honest scope limits
+
+**Context**: Phase 12 needed to combine every signal built across
+Phases 6-11 into one final, explainable action recommendation, per the
+project's original DECISION ENGINE design.
+
+**Scope decision, stated plainly**: this first slice only produces
+position-independent actions (BUY, HOLD, AVOID), not the full action
+vocabulary (ADD, TAKE_PARTIAL_PROFIT, REDUCE_POSITION, EXIT) from the
+original design - those genuinely require knowing whether a position is
+already held, which needs Phase 13's paper-trading/position tracker,
+not built yet. When a CRITICAL security signal fires, the output
+explicitly notes this would be an EMERGENCY_EXIT if a position were
+held - surfaced as real information rather than either faking an action
+this module can't correctly compute, or silently dropping the insight.
+
+**Core design, directly from the project's stated requirements**:
+"Do not treat any security API as an unquestionable source of truth"
+and security overrides "must be explicit and auditable." Implemented as
+literal PRIORITY ORDER in `decision_logic.py`: override conditions
+(CRITICAL/VERY_HIGH rug-risk tier, or an acute-negative news event type
+like hack/exploit/rug_allegations) are checked FIRST, before the entry
+model's probability is even examined. Verified with a test asserting a
+CRITICAL risk tier overrides even a 0.99 (near-maximum) bullish entry
+probability - the single most important property of this module, and
+the literal point of building overrides as a checked-first priority
+rather than one input blended into a weighted score alongside others.
+
+**Entry model deliberately NOT wired to the real Phase 6 model in this
+slice**: that model's own metrics (documented back in Phase 6) showed
+ROC-AUC of 0.24 - worse than random guessing, on a single week of a
+single token's data. Passing `entry_model_probability=None` in the
+runner is a deliberate choice to correctly reflect "not used" rather
+than silently trusting a signal already known not to be trustworthy.
+
+**Precise, verified consequence of that choice, not just described
+approximately**: tracing `decision_logic.py`'s branch structure with
+`entry_model_probability` always `None` shows `BUY` is currently
+UNREACHABLE through this runner - confirmed by direct testing, not
+just read from the code. Only `AVOID` (via an override) or `HOLD`
+(everything else) can actually be produced right now. This is stated
+precisely here (an initial draft of this doc said BUY would just be
+"less likely," which was wrong when actually checked) because an
+approximately-true description of a decision engine's real behavior is
+exactly the kind of inaccuracy this project's own values argue against.
+Wiring in a genuinely better-trained model later, changing one hardcoded
+line in `run_decision_check.py`, is what would make BUY reachable.
+
+**A real bug caught before it ever ran**: while wiring this together,
+`BirdeyeHolderAdapter` was initially imported from
+`rug_pull_intelligence.birdeye_holder_adapter` - it actually lives in
+`wallet_intelligence.birdeye_holder_adapter` (built back in Phase 9).
+Caught by actually attempting to import the finished module (not just
+running the lint/format tools, which flag import-order style issues but
+don't verify a module PATH resolves to anything real) before considering
+this done - the same "prove it, don't assume it" discipline applied
+throughout tonight, this time applied to wiring rather than to a live
+API call.
+
+11 tests for the decision logic (covering both override paths, the
+non-override BUY/HOLD/AVOID paths, missing-signal handling, and the
+explicit-reasons-not-hidden-scoring property). 148/148 tests passing
+overall, lint/format clean.
