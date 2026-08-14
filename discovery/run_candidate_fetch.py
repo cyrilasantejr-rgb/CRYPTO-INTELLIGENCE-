@@ -2,11 +2,10 @@
 CLI entry point for discovery/birdeye_discovery_adapter.py - manual/ad-hoc
 runner for the token screener, first slice.
 
-Defaults here mirror DiscoveryFilters: max_liquidity defines a
-small-cap universe first, sort_by=volume_24h_usd ranks within it by
-absolute dollar activity (not percent change - see DiscoveryFilters
-docstring for why percent-change ranking near a zero baseline blew up
-in live testing).
+Defaults mirror DiscoveryFilters: max_liquidity defines a small-cap
+universe first, sort_by=volume_24h_usd ranks within it by absolute
+dollar activity. Results are then split into valid/quarantined via
+candidate_quality.validate_candidates() before being printed.
 
 Usage:
     python3 -m discovery.run_candidate_fetch
@@ -25,6 +24,7 @@ from dotenv import load_dotenv
 
 from common.schemas.discovery_filters import DiscoveryFilters
 from discovery.birdeye_discovery_adapter import BirdeyeDiscoveryAdapter
+from discovery.candidate_quality import validate_candidates
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -51,6 +51,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--chain", default="solana")
     return parser.parse_args()
+
+
+def _print_row(envelope) -> None:
+    p = envelope.payload
+    print(
+        f"  {envelope.token_address}  "
+        f"symbol={p.get('symbol', '?')}  "
+        f"vol24h=${p.get('volume_24h_usd', 0):,.0f}  "
+        f"liq=${p.get('liquidity', 0):,.0f}"
+    )
 
 
 def main() -> int:
@@ -86,7 +96,7 @@ def main() -> int:
         logger.error("Request failed after retries: %s", exc)
         return 1
 
-    logger.info("Received %d candidate(s)", len(candidates))
+    logger.info("Received %d raw candidate(s)", len(candidates))
 
     if not candidates:
         logger.warning(
@@ -96,20 +106,21 @@ def main() -> int:
         )
         return 0
 
-    print("\n--- First candidate, full raw payload (confirms real field names) ---")
-    print(json.dumps(candidates[0].payload, indent=2, default=str))
+    valid, quarantined = validate_candidates(candidates)
+
+    print(f"\n--- VALID: {len(valid)} candidate(s) ---")
+    for envelope in valid:
+        _print_row(envelope)
 
     print(
-        f"\n--- All {len(candidates)} candidates (address, symbol, volume_24h_usd, liquidity) ---"
+        f"\n--- QUARANTINED: {len(quarantined)} candidate(s) (see WARNING logs above for why) ---"
     )
-    for envelope in candidates:
-        p = envelope.payload
-        print(
-            f"  {envelope.token_address}  "
-            f"symbol={p.get('symbol', '?')}  "
-            f"vol24h=${p.get('volume_24h_usd', 0):,.0f}  "
-            f"liq=${p.get('liquidity', 0):,.0f}"
-        )
+    for envelope in quarantined:
+        _print_row(envelope)
+
+    if valid:
+        print("\n--- First VALID candidate, full raw payload ---")
+        print(json.dumps(valid[0].payload, indent=2, default=str))
 
     return 0
 
