@@ -124,3 +124,33 @@ class WalletTransactionAdapter(ABC):
         format provides - token transfers, timestamps, transaction type).
         """
         raise NotImplementedError
+
+
+class TokenDiscoveryAdapter(ABC):
+    """
+    Interface for any vendor that can screen/discover tokens matching
+    filter criteria (liquidity, volume, holder count, price change,
+    etc.) - fundamentally different from the other adapters above,
+    which all take a KNOWN token_address as input. Discovery takes
+    FILTER CRITERIA as input and returns tokens the caller has never
+    seen before. That's the entire point: finding new candidates,
+    not looking up known ones.
+
+    Same reason this is its own interface rather than a method bolted
+    onto RealtimePriceAdapter: different input shape (filters, not a
+    list of addresses), different vendor endpoint, different caller
+    (a periodic screener job, not a position-tracking poll loop).
+    """
+
+    source_name: str
+
+    @abstractmethod
+    def discover_candidates(self, filters: "DiscoveryFilters") -> Iterator[BronzeEnvelope]:
+        """
+        Fetch tokens matching the given filters, yielding one
+        BronzeEnvelope per matching token. Implementations should NOT
+        apply any scoring or ranking logic beyond what the vendor's
+        own sort_by/sort_type provide - this interface returns raw
+        screened candidates, not recommendations.
+        """
+        raise NotImplementedError
