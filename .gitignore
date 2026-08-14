@@ -38,3 +38,7 @@ data/
 # Phase 14: local MLflow tracking database and artifact store
 mlflow.db
 mlruns/
+
+# Phase 7: local Airflow runtime (not portable, machine-specific)
+airflow_home/
+airflow_venv/
