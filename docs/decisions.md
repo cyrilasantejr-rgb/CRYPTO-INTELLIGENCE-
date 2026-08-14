@@ -1180,3 +1180,33 @@ halves of an integration have already been individually tested -
 zero-positive-examples-in-test-set case at the SAME time as the new
 MLflow logging code, because that specific combination only actually
 occurred with this project's real, current data distribution.
+
+---
+
+## ADR-038: ROC-AUC unavailable for promotion comparison - known data-volume limitation, not a bug
+
+**Context**: Phase 14's promotion logic requires ROC-AUC to compare
+champion vs. challenger models. All 4 real MLflow runs so far show
+`positive_rate_test = 0.0` - meaning the chronological test split
+(most recent ~585 rows) contains zero examples of the "+10% before
+-5%" event being predicted, so ROC-AUC is mathematically undefined
+and correctly omitted from MLflow logging (see `_log_metrics_safely`
+in ml/run_training.py).
+
+**Root cause, confirmed empirically**: total training data is small
+(2,336 rows) and the positive event is rare (~0.51% positive rate in
+training, ~12 total positive examples). The chronological split
+(`ml/entry/split.py`) is correct and deliberate - random splitting
+would leak future information into training - so this is a genuine
+consequence of limited data volume, not a split-logic bug.
+
+**Decision**: no code change. This resolves naturally as Phase 7's
+Airflow pipeline accumulates more historical data over time, giving
+the rare positive event more chances to appear in both train and
+test windows. Revisit once training data volume grows meaningfully
+(e.g. reassess after 30+ more days of ingestion).
+
+**Known limitation stated plainly**: until then, promotion checks for
+the entry model will correctly REJECT any challenger, since ROC-AUC
+comparison has no data to work with. This is safe (no bad promotion
+can occur) but means no promotion will happen until more data exists.
