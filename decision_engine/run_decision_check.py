@@ -31,7 +31,7 @@ import os
 
 from dotenv import load_dotenv
 
-from decision_engine.decision_logic import make_recommendation
+from decision_engine.decision_logic import Recommendation, make_recommendation
 from news_intelligence.news_classification import classify_news_item
 from news_intelligence.rss_news_adapter import RssNewsAdapter
 from rug_pull_intelligence.mint_authority import parse_mint_authority_flags
@@ -123,7 +123,12 @@ def _get_news_signal(topic: str | None) -> tuple[str | None, str | None]:
     return most_severe
 
 
-def run(token_address: str, dev_wallet: str | None, news_topic: str | None) -> None:
+def compute_recommendation(
+    token_address: str, dev_wallet: str | None, news_topic: str | None
+) -> Recommendation:
+    """Pure computation: gathers signals, builds the recommendation,
+    and returns it. No logging, no side effects - callers (CLI or
+    dashboard) decide how to present the result."""
     load_dotenv()
     birdeye_key = os.environ.get("BIRDEYE_API_KEY")
     helius_key = os.environ.get("HELIUS_API_KEY")
@@ -144,13 +149,21 @@ def run(token_address: str, dev_wallet: str | None, news_topic: str | None) -> N
     # only requires changing this one line.
     entry_model_probability = None
 
-    recommendation = make_recommendation(
+    return make_recommendation(
         rug_risk_score=rug_risk_score,
         rug_risk_tier=rug_risk_tier,
         entry_model_probability=entry_model_probability,
         news_event_type=news_event_type,
         news_credibility=news_credibility,
     )
+
+
+def run(token_address: str, dev_wallet: str | None, news_topic: str | None) -> None:
+    """Thin CLI wrapper: computes the recommendation, logs it. Kept
+    separate from compute_recommendation() so the dashboard (Phase 15)
+    can call the same underlying logic without importing logging
+    side effects - single source of truth for the recommendation."""
+    recommendation = compute_recommendation(token_address, dev_wallet, news_topic)
 
     logger.info("=== Decision: %s ===", token_address)
     logger.info("ACTION: %s", recommendation.action)
