@@ -16,6 +16,10 @@ generously rather than making many small calls.
 First slice: no scoring, no ranking beyond what Birdeye's own
 sort_by/sort_type provide, no ML, no social data. Just a clean,
 filtered, verified feed of raw candidates into the Bronze layer.
+
+DiscoveryFilters itself lives in common/schemas/discovery_filters.py,
+not here - it's a vendor-agnostic concept the shared interface needs
+to reference, so it can't live inside a vendor-specific adapter file.
 """
 
 from __future__ import annotations
@@ -24,90 +28,17 @@ import logging
 import random
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import requests
 
 from common.interfaces.source_adapter import TokenDiscoveryAdapter
+from common.schemas.discovery_filters import DiscoveryFilters
 from common.schemas.envelope import BronzeEnvelope
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://public-api.birdeye.so/defi/v3/token/list"
-
-
-@dataclass
-class DiscoveryFilters:
-    """
-    Query parameters for the token screener. Every min_/max_ field is
-    optional (None = do not send that filter to Birdeye at all) - see
-    to_params() for why that distinction matters.
-
-    Defaults target small-cap tokens with real trading activity, not
-    the whole market. max_liquidity is what actually excludes blue
-    chips (SOL, USDC) - that ceiling defines the universe FIRST. Only
-    then does sort_by="volume_24h_usd" rank within it, by absolute
-    dollar activity.
-
-    An earlier version of this file sorted by volume_24h_change_percent
-    (percent change) instead - reverted after live testing showed it is
-    numerically unstable near a zero baseline: a token trading for the
-    first time has ~$0 prior-period volume, so ANY volume at all reads
-    as a multi-billion-percent change (confirmed live: 7,584,390,951%
-    on a token whose entire trade history was ~4 hours old) and
-    dominates the ranking regardless of real quality. Percent-change
-    fields remain useful as FLOORS on a future filter, but should not
-    be the primary sort key when the underlying baseline can be ~zero.
-
-    min_volume_24h_usd, min_holder, and min_trade_24h_count remain as
-    floors against dead pools and wash-trade noise. These thresholds
-    are heuristic starting points, not empirically derived - expect to
-    tune them once Phase 5's backtesting framework can evaluate which
-    filter combinations actually preceded good entries historically.
-    """
-
-    sort_by: str = "volume_24h_usd"
-    sort_type: str = "desc"
-    min_liquidity: float | None = 5_000
-    max_liquidity: float | None = 2_000_000
-    min_volume_24h_usd: float | None = 10_000
-    min_holder: int | None = 50
-    min_trade_24h_count: int | None = 50
-    limit: int = 50
-    offset: int = 0
-    chain: str = "solana"
-
-    def to_params(self) -> dict:
-        """
-        Build the query-param dict for this request, OMITTING any
-        field that is None.
-
-        Why this matters: Birdeye's docs define min_liquidity etc. as
-        "filter for records >= this value." If we sent min_liquidity=0
-        instead of omitting it, that is still a valid, deliberate filter
-        (0 is a real number) - but None means "the user did not ask to
-        filter on this at all," which is a different thing. Sending a
-        key with value None/null would either error or be misread by
-        the vendor, so we must drop the key entirely, not send it empty.
-        """
-        params: dict = {
-            "sort_by": self.sort_by,
-            "sort_type": self.sort_type,
-            "limit": min(self.limit, 100),  # vendor caps at 100 per docs
-            "offset": self.offset,
-        }
-        optional = {
-            "min_liquidity": self.min_liquidity,
-            "max_liquidity": self.max_liquidity,
-            "min_volume_24h_usd": self.min_volume_24h_usd,
-            "min_holder": self.min_holder,
-            "min_trade_24h_count": self.min_trade_24h_count,
-        }
-        for key, value in optional.items():
-            if value is not None:
-                params[key] = value
-        return params
 
 
 class BirdeyeDiscoveryAdapter(TokenDiscoveryAdapter):

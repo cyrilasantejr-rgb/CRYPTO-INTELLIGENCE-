@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from datetime import datetime
 
+from common.schemas.discovery_filters import DiscoveryFilters
 from common.schemas.envelope import BronzeEnvelope
 
 
@@ -64,9 +65,7 @@ class RealtimePriceAdapter(ABC):
     source_name: str
 
     @abstractmethod
-    def fetch_latest_prices(
-        self, token_addresses: list[str]
-    ) -> Iterator[BronzeEnvelope]:
+    def fetch_latest_prices(self, token_addresses: list[str]) -> Iterator[BronzeEnvelope]:
         """
         Fetch the current price for each address in token_addresses,
         yielding one BronzeEnvelope per token. Implementations should
@@ -114,9 +113,7 @@ class WalletTransactionAdapter(ABC):
     source_name: str
 
     @abstractmethod
-    def fetch_transactions(
-        self, wallet_address: str, limit: int = 100
-    ) -> BronzeEnvelope:
+    def fetch_transactions(self, wallet_address: str, limit: int = 100) -> BronzeEnvelope:
         """
         Fetch recent transaction history for a wallet, returning one
         BronzeEnvelope whose payload contains the raw list of parsed
@@ -145,7 +142,7 @@ class TokenDiscoveryAdapter(ABC):
     source_name: str
 
     @abstractmethod
-    def discover_candidates(self, filters: "DiscoveryFilters") -> Iterator[BronzeEnvelope]:
+    def discover_candidates(self, filters: DiscoveryFilters) -> Iterator[BronzeEnvelope]:
         """
         Fetch tokens matching the given filters, yielding one
         BronzeEnvelope per matching token. Implementations should NOT

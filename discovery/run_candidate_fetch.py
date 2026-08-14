@@ -23,7 +23,8 @@ import sys
 
 from dotenv import load_dotenv
 
-from discovery.birdeye_discovery_adapter import BirdeyeDiscoveryAdapter, DiscoveryFilters
+from common.schemas.discovery_filters import DiscoveryFilters
+from discovery.birdeye_discovery_adapter import BirdeyeDiscoveryAdapter
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
