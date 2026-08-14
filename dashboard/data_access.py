@@ -96,6 +96,16 @@ def get_open_positions() -> list[PositionView]:
     return views
 
 
+# First-slice watchlist: a small, explicit list of tokens you're
+# personally tracking but don't hold a position in yet. Hardcoded,
+# not stored in a database - deliberately simple for this first slice.
+# A real add/remove-able watchlist (its own SQLite table) is a natural
+# next step once this display logic is verified working.
+WATCHLIST_TOKENS: list[str] = [
+    "So11111111111111111111111111111111111111112",  # wrapped SOL
+]
+
+
 def get_recommendation_for_token(
     token_address: str,
     dev_wallet: str | None = None,
@@ -112,3 +122,31 @@ def get_recommendation_for_token(
         # in an unexpected way. Narrowing this would let one bad token
         # crash the whole page instead of showing one missing card.
         return None
+
+
+@dataclass
+class WatchlistItem:
+    """A token being tracked with no open position - price and
+    recommendation only, no P&L fields since there is no position."""
+
+    token_address: str
+    current_price: float | None
+    recommendation: Recommendation | None
+
+
+def get_watchlist() -> list[WatchlistItem]:
+    """Fetches price and recommendation for each token in
+    WATCHLIST_TOKENS. Same graceful-degradation pattern as
+    get_open_positions - one token failing does not block the rest."""
+    items = []
+    for token_address in WATCHLIST_TOKENS:
+        price = get_current_price(token_address)
+        recommendation = get_recommendation_for_token(token_address)
+        items.append(
+            WatchlistItem(
+                token_address=token_address,
+                current_price=price,
+                recommendation=recommendation,
+            )
+        )
+    return items
