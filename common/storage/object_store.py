@@ -72,6 +72,22 @@ class ObjectStoreClient:
         logger.info("Wrote %d records to %s", len(records), uri)
         return uri
 
+    def read_parquet(self, key: str) -> list[dict[str, Any]]:
+        """
+        Download and parse a Parquet object back into a list of dict
+        records - the read-side counterpart to write_parquet().
+
+        Used by discovery/bronze_reader.py (and, eventually, anything
+        else that wants to read Bronze data back without spinning up a
+        Spark session - see candidate_quality.py's docstring for why
+        Spark is not the right tool for this project's smaller-volume
+        domains).
+        """
+        data = self.get_object_bytes(key)
+        buffer = io.BytesIO(data)
+        table = pq.read_table(buffer)
+        return table.to_pylist()
+
     def get_object_bytes(self, key: str) -> bytes:
         """Download an object's raw bytes. Used to stage Bronze files locally
         before a local Spark session reads them (see databricks/silver/

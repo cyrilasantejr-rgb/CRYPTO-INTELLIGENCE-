@@ -93,7 +93,10 @@ else:
 
 
 st.header("Watchlist")
-st.caption("Tokens you're tracking, no open position yet.")
+st.caption(
+    "Tokens you're tracking, no open position yet. 📌 = added manually, "
+    "🔍 = found by the discovery engine's most recent screening run."
+)
 
 watchlist_items = get_watchlist()
 
@@ -103,6 +106,9 @@ else:
     for item in watchlist_items:
         with st.container(border=True):
             wcol1, wcol2 = st.columns(2)
+
+            source_label = "🔍 Discovered" if item.source == "discovered" else "📌 Manual"
+            wcol1.caption(source_label)
             wcol1.write(f"Token: {item.token_address[:8]}...")
 
             if item.current_price is not None:

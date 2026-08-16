@@ -41,9 +41,9 @@ def test_write_parquet_round_trips_records(store):
 
     raw = (
         boto3.client("s3", region_name="us-east-1")
-        .get_object(
-            Bucket="test-bucket", Key="bronze/market/dt=2026-08-01/test.parquet"
-        )["Body"]
+        .get_object(Bucket="test-bucket", Key="bronze/market/dt=2026-08-01/test.parquet")[
+            "Body"
+        ]
         .read()
     )
     table = pq.read_table(io.BytesIO(raw))
@@ -64,3 +64,15 @@ def test_list_keys_returns_only_matching_prefix(store):
     market_keys = store.list_keys(prefix="bronze/market/")
     assert len(market_keys) == 2
     assert all(k.startswith("bronze/market/") for k in market_keys)
+
+
+def test_read_parquet_round_trips_records(store):
+    records = [
+        {"event_id": "abc123", "token_address": "TokenA", "payload": {"c": 1.1}},
+        {"event_id": "def456", "token_address": "TokenA", "payload": {"c": 1.2}},
+    ]
+    store.write_parquet(records, key="bronze/market/dt=2026-08-01/roundtrip.parquet")
+
+    read_back = store.read_parquet(key="bronze/market/dt=2026-08-01/roundtrip.parquet")
+
+    assert read_back == records
