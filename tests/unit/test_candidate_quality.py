@@ -25,7 +25,7 @@ def _make_candidate(address: str, liquidity, volume_24h) -> BronzeEnvelope:
         source="test",
         token_address=address,
         event_timestamp=datetime.now(timezone.utc),
-        domain="market",
+        domain="discovery",
         payload=payload,
     )
 

@@ -114,6 +114,6 @@ class BirdeyeDiscoveryAdapter(TokenDiscoveryAdapter):
                 source=self.source_name,
                 token_address=address,
                 event_timestamp=datetime.now(timezone.utc),
-                domain="market",
+                domain="discovery",
                 payload=item,
             )
