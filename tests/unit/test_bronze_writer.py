@@ -4,8 +4,8 @@ import pytest
 from moto import mock_aws
 
 from common.schemas.envelope import BronzeEnvelope
+from common.storage.bronze_writer import write_bronze_batch
 from common.storage.object_store import ObjectStoreClient
-from ingestion.market.bronze_writer import write_bronze_batch
 
 
 @pytest.fixture
