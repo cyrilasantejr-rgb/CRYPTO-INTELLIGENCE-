@@ -29,9 +29,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from common.storage.bronze_writer import write_bronze_batch
 from common.storage.object_store import ObjectStoreClient
 from ingestion.market.birdeye_adapter import BirdeyeAdapter
-from ingestion.market.bronze_writer import write_bronze_batch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -87,14 +87,10 @@ def run(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Historical market ingestion (Birdeye)"
-    )
+    parser = argparse.ArgumentParser(description="Historical market ingestion (Birdeye)")
     parser.add_argument("--token", required=True, help="Solana token mint address")
     parser.add_argument("--days", type=int, default=30, help="Days of history to fetch")
-    parser.add_argument(
-        "--interval", default="1H", help="Candle interval, e.g. 1H, 15m"
-    )
+    parser.add_argument("--interval", default="1H", help="Candle interval, e.g. 1H, 15m")
     parser.add_argument(
         "--output-dir", default="data/bronze/market", help="Local output directory"
     )

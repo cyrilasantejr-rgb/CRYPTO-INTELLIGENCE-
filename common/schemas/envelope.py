@@ -17,7 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 Domain = Literal[
-    "market", "transaction", "wallet", "holder", "security", "news", "social"
+    "market", "transaction", "wallet", "holder", "security", "news", "social", "discovery"
 ]
 
 

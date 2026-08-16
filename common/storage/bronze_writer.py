@@ -56,10 +56,7 @@ def write_bronze_batch(
     written_uris = []
 
     for (domain, event_date, token_address), group in groups.items():
-        key = (
-            f"bronze/{domain}/dt={event_date}/"
-            f"token={token_address}/{run_id}.parquet"
-        )
+        key = f"bronze/{domain}/dt={event_date}/token={token_address}/{run_id}.parquet"
         records = [env.model_dump(mode="json") for env in group]
         uri = store.write_parquet(records, key)
         written_uris.append(uri)

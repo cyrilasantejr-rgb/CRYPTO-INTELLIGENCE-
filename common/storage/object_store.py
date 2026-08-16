@@ -56,7 +56,7 @@ class ObjectStoreClient:
         Note: this always PUTs to `key` - if `key` already exists, its
         content is replaced. Callers are responsible for choosing a key
         scheme that matches their durability requirements (see
-        ingestion/market/bronze_writer.py for why we use run-scoped keys
+        common/storage/bronze_writer.py for why we use run-scoped keys
         to keep the Bronze layer append-only).
         """
         if not records:

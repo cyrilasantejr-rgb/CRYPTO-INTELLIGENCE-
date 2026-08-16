@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from datetime import datetime
 
+from common.schemas.discovery_filters import DiscoveryFilters
 from common.schemas.envelope import BronzeEnvelope
 
 
@@ -64,9 +65,7 @@ class RealtimePriceAdapter(ABC):
     source_name: str
 
     @abstractmethod
-    def fetch_latest_prices(
-        self, token_addresses: list[str]
-    ) -> Iterator[BronzeEnvelope]:
+    def fetch_latest_prices(self, token_addresses: list[str]) -> Iterator[BronzeEnvelope]:
         """
         Fetch the current price for each address in token_addresses,
         yielding one BronzeEnvelope per token. Implementations should
@@ -114,13 +113,41 @@ class WalletTransactionAdapter(ABC):
     source_name: str
 
     @abstractmethod
-    def fetch_transactions(
-        self, wallet_address: str, limit: int = 100
-    ) -> BronzeEnvelope:
+    def fetch_transactions(self, wallet_address: str, limit: int = 100) -> BronzeEnvelope:
         """
         Fetch recent transaction history for a wallet, returning one
         BronzeEnvelope whose payload contains the raw list of parsed
         transactions (whatever shape the vendor's "enhanced"/parsed
         format provides - token transfers, timestamps, transaction type).
+        """
+        raise NotImplementedError
+
+
+class TokenDiscoveryAdapter(ABC):
+    """
+    Interface for any vendor that can screen/discover tokens matching
+    filter criteria (liquidity, volume, holder count, price change,
+    etc.) - fundamentally different from the other adapters above,
+    which all take a KNOWN token_address as input. Discovery takes
+    FILTER CRITERIA as input and returns tokens the caller has never
+    seen before. That's the entire point: finding new candidates,
+    not looking up known ones.
+
+    Same reason this is its own interface rather than a method bolted
+    onto RealtimePriceAdapter: different input shape (filters, not a
+    list of addresses), different vendor endpoint, different caller
+    (a periodic screener job, not a position-tracking poll loop).
+    """
+
+    source_name: str
+
+    @abstractmethod
+    def discover_candidates(self, filters: DiscoveryFilters) -> Iterator[BronzeEnvelope]:
+        """
+        Fetch tokens matching the given filters, yielding one
+        BronzeEnvelope per matching token. Implementations should NOT
+        apply any scoring or ranking logic beyond what the vendor's
+        own sort_by/sort_type provide - this interface returns raw
+        screened candidates, not recommendations.
         """
         raise NotImplementedError
