@@ -41,6 +41,28 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://public-api.birdeye.so/defi/v3/token/list"
 
 
+def _sanitize_empty_structs(item: dict) -> dict:
+    """
+    Birdeye can return an empty JSON object ({}) for optional structured
+    fields - e.g. "extensions" when a token has no social/metadata links
+    filled in. PyArrow cannot infer a Parquet struct type with zero
+    child fields, and bronze_writer.py groups Bronze writes one-per-
+    token (every discovery candidate has a unique token_address, unlike
+    market OHLCV where many candles share one), so nearly every write
+    is a single-row table with no other rows to infer a fuller schema
+    from. Confirmed live: pyarrow.lib.ArrowNotImplementedError: "Cannot
+    write struct type \'extensions\' with no child field to Parquet"
+    on a --limit 100 run.
+
+    Replacing {} with None does NOT alter real vendor data - an empty
+    object and an absent/null field both mean "no data provided" - it
+    only makes an already-information-free value representable in
+    Parquet. Only top-level empty dicts are handled; nested cases
+    have not been observed yet.
+    """
+    return {key: (None if value == {} else value) for key, value in item.items()}
+
+
 class BirdeyeDiscoveryAdapter(TokenDiscoveryAdapter):
     source_name = "birdeye"
 
@@ -109,6 +131,8 @@ class BirdeyeDiscoveryAdapter(TokenDiscoveryAdapter):
             if not address:
                 logger.warning("Skipping candidate with no address field: %s", item)
                 continue
+
+            item = _sanitize_empty_structs(item)
 
             yield BronzeEnvelope.build(
                 source=self.source_name,

@@ -3,11 +3,11 @@ Read-only data access layer for the Phase 15 dashboard.
 
 Deliberately contains NO new business logic - every function here
 calls an existing, already-tested module (PositionStore, position_math,
-BirdeyeRealtimePriceAdapter, compute_recommendation) and reshapes the
-result into something simple for the dashboard to render. If the
-underlying decision/PnL/position logic ever changes, it changes in ONE
-place (its original module) and both the CLI tools and this dashboard
-automatically stay in sync.
+BirdeyeRealtimePriceAdapter, compute_recommendation, discovery's
+bronze_reader) and reshapes the result into something simple for the
+dashboard to render. If the underlying decision/PnL/position/discovery
+logic ever changes, it changes in ONE place (its original module) and
+both the CLI tools and this dashboard automatically stay in sync.
 
 Every function takes explicit inputs and returns plain data (dicts,
 dataclasses) - no Streamlit imports here at all. This keeps this module
@@ -17,16 +17,21 @@ verify it works.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from common.storage.object_store import ObjectStoreClient
 from decision_engine.decision_logic import Recommendation
 from decision_engine.run_decision_check import compute_recommendation
+from discovery.bronze_reader import read_latest_valid_candidates
 from ingestion.market.birdeye_realtime_adapter import BirdeyeRealtimePriceAdapter
 from paper_trading.position_math import unrealized_pnl, unrealized_pnl_pct
 from paper_trading.position_store import PositionStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -124,22 +129,100 @@ def get_recommendation_for_token(
         return None
 
 
+# Real discovery runs can surface dozens of valid candidates; each one
+# costs TWO live API calls when enriched (price + recommendation).
+# Capped here, not in bronze_reader.py, since this is a DASHBOARD
+# rendering/cost concern specifically, not a fact about the data itself.
+MAX_DISCOVERED_WATCHLIST_SIZE = 10
+
+
+def get_discovered_watchlist_tokens() -> list[str]:
+    """
+    Token addresses from the most recent discovery Bronze partition,
+    valid (non-quarantined) only - see discovery/bronze_reader.py.
+
+    Deliberately reads from Bronze rather than calling
+    discover_candidates() live: a screener call costs 75 CU and can
+    return up to 100 NEW addresses on every call. Re-running it live on
+    every Streamlit render (every click, every page refresh) would be
+    slow and wasteful compared to reading what a periodic discovery run
+    already persisted.
+
+    Returns [] (not an exception) if MinIO/S3 is unreachable or no
+    discovery data exists yet - same graceful-degradation pattern as
+    get_recommendation_for_token. An optional data source failing
+    should never take down the rest of the dashboard.
+    """
+    try:
+        store = ObjectStoreClient(
+            bucket=os.environ.get("S3_BUCKET_NAME", "crypto-intelligence"),
+            endpoint_url=os.environ.get("MINIO_ENDPOINT") or None,
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID")
+            or os.environ.get("MINIO_ACCESS_KEY"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY")
+            or os.environ.get("MINIO_SECRET_KEY"),
+        )
+        candidates = read_latest_valid_candidates(store)
+        # Cap and rank by volume_24h_usd - a real discovery run can
+        # return dozens of valid candidates, and each one costs TWO
+        # live API calls when enriched below (get_current_price +
+        # get_recommendation_for_token). Rendering all of them on every
+        # dashboard click/refresh would be slow and API-expensive.
+        # Ranking by the same volume metric discovery itself sorts by
+        # means "top N" reflects real dollar activity, not S3 listing
+        # order (which is arbitrary).
+        candidates.sort(key=lambda c: c.payload.get("volume_24h_usd", 0), reverse=True)
+        top_candidates = candidates[:MAX_DISCOVERED_WATCHLIST_SIZE]
+        return [c.token_address for c in top_candidates]
+    except Exception:
+        # source (discovery) must never crash the dashboard's core
+        # positions/watchlist rendering.
+        logger.warning("Could not read discovery candidates from Bronze", exc_info=True)
+        return []
+
+
 @dataclass
 class WatchlistItem:
     """A token being tracked with no open position - price and
-    recommendation only, no P&L fields since there is no position."""
+    recommendation only, no P&L fields since there is no position.
+
+    source distinguishes how this token ended up on the watchlist:
+    "manual" (in WATCHLIST_TOKENS) or "discovered" (found by the
+    discovery engine's most recent Bronze-persisted run) - shown in
+    the UI so an unfamiliar address always has a visible reason for
+    being there, rather than looking like an unexplained addition.
+    """
 
     token_address: str
     current_price: float | None
     recommendation: Recommendation | None
+    source: str
 
 
 def get_watchlist() -> list[WatchlistItem]:
-    """Fetches price and recommendation for each token in
-    WATCHLIST_TOKENS. Same graceful-degradation pattern as
-    get_open_positions - one token failing does not block the rest."""
-    items = []
+    """
+    Fetches price and recommendation for each token in WATCHLIST_TOKENS
+    plus every token the discovery engine's most recent run marked
+    valid. Deduplicated (a manually-added token that discovery also
+    finds is shown once, tagged "manual" since it was added first).
+    Same graceful-degradation pattern as get_open_positions - one token
+    failing does not block the rest.
+    """
+    discovered = get_discovered_watchlist_tokens()
+
+    seen: set[str] = set()
+    ordered_tokens: list[tuple[str, str]] = []
     for token_address in WATCHLIST_TOKENS:
+        if token_address not in seen:
+            seen.add(token_address)
+            ordered_tokens.append((token_address, "manual"))
+    for token_address in discovered:
+        if token_address not in seen:
+            seen.add(token_address)
+            ordered_tokens.append((token_address, "discovered"))
+
+    items = []
+    for token_address, source in ordered_tokens:
         price = get_current_price(token_address)
         recommendation = get_recommendation_for_token(token_address)
         items.append(
@@ -147,6 +230,7 @@ def get_watchlist() -> list[WatchlistItem]:
                 token_address=token_address,
                 current_price=price,
                 recommendation=recommendation,
+                source=source,
             )
         )
     return items
