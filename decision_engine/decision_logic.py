@@ -45,7 +45,7 @@ OVERRIDE_RISK_TIERS = {"CRITICAL", "VERY_HIGH"}
 
 @dataclass
 class Recommendation:
-    action: str  # BUY / HOLD / AVOID
+    action: str  # BUY / WATCHLIST / HOLD / AVOID
     confidence: float  # 0.0 to 1.0
     reasons: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
@@ -60,6 +60,7 @@ def make_recommendation(
     entry_model_probability: float | None,
     news_event_type: str | None = None,
     news_credibility: str | None = None,
+    discovery_momentum_tier: str | None = None,
 ) -> Recommendation:
     """
     All signals accept None to mean "unavailable" - same "missing data
@@ -69,6 +70,18 @@ def make_recommendation(
     signal or a credible acute-negative-news signal, when actually
     present, overrides regardless of what else is or isn't known. Missing
     signals don't trigger overrides; present, severe signals do.
+
+    discovery_momentum_tier ("STRONG"/"MODERATE"/None, from
+    discovery/momentum_signal.py) is a DETERMINISTIC screening
+    heuristic on raw market metrics (volume, liquidity, holders, trade
+    count) - explicitly NOT the ML entry model. It can only ever
+    produce the WATCHLIST action, never BUY: while entry_model_probability
+    is None (currently true for every candidate - see
+    run_decision_check.py's docstring on why), there is no learned
+    signal backing a genuine BUY recommendation, and this module will
+    not manufacture one out of a threshold check. WATCHLIST means
+    "passed real screening criteria, worth a manual look" - a narrower,
+    more honest claim than BUY.
     """
     reasons: list[str] = []
     risks: list[str] = []
@@ -105,9 +118,7 @@ def make_recommendation(
         )
         return Recommendation(
             action="AVOID",
-            confidence=0.75,  # slightly lower than the security-tier
-            # override - a single news report, even a serious one, is
-            # less certain than an on-chain-verified risk signal
+            confidence=0.75,
             reasons=reasons,
             risks=[f"News event: {news_event_type}"],
             override_triggered=True,
@@ -124,11 +135,21 @@ def make_recommendation(
 
     if entry_model_probability is None:
         reasons.append("Entry model probability unavailable")
-        # Without an entry signal, and without any override, there is
-        # not enough basis to recommend BUY - default to the cautious
-        # middle ground.
-        action = "HOLD"
-        confidence = 0.3
+        if discovery_momentum_tier == "STRONG" and rug_risk_tier in (
+            None,
+            "LOW",
+            "MODERATE",
+        ):
+            reasons.append(
+                "Discovery screening metrics (volume, liquidity, holders, "
+                "trade count) are strong - this is a raw-data heuristic, "
+                "NOT a model prediction, and does not by itself justify BUY"
+            )
+            action = "WATCHLIST"
+            confidence = 0.5
+        else:
+            action = "HOLD"
+            confidence = 0.3
     elif entry_model_probability >= 0.6 and rug_risk_tier in (None, "LOW", "MODERATE"):
         reasons.append(
             f"Entry model probability is {entry_model_probability:.2f} (bullish)"
